@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+  <meta charset="UTF-8">
+</head>
+<body>
+<!-- <canvas id="canvas"></canvas> -->
+<canvas id="canvas2"></canvas>
+<form oninput="updateForm();" >
+  <div class="togglebutton inlineContents">
+      <label for="control">Toggle Controls</label>
+      |
+      <input class="toggle" id="stop" type="checkbox" checked="false">
+      <label class="off" for="stop" name="started" class="togglebutton"> Stop </label>
+      <label class="on" for="stop" name="stopped" class="togglebutton"> Start </label>
+      <span class="on"> | <label onclick="runEventQ();"> Step </label> </span>
+  </div>
+
+  <input class="toggle" id="control" type="checkbox">
+  <div class="off">
+      <div>
+          <input class="toggle tab" id="hideTab" name="tab" type="radio">
+      </div>
+      <div>
+          <input class="tab" id="groundTab" name="tab" type="checkbox">
+          <label class="tab block" for="groundTab"> Ground </label>
+          <div class="tab">
+              <label>
+                  <input id="num" name="num" value="500" size="3" type="text">
+                  nodes
+              </label>
+
+              <label title="Some nodes repel other nodes, creating holes in the field.">
+                  <input id="stinky" name="stinky" type="range" min="0" max="100" value="0">
+                  <output for="stinky" id="stinkyOut"></output> per thousand repellant nodes
+              </label>
+
+              <label>
+                  <input id="avgNeighbors" name="avgNeighbors" size="3" type="text" value="5" >
+                  average number of neighbors
+              </label>
+
+              <label>
+                  <input id="maxSpeed" name="maxSpeed" size="3" type="text" value="5">
+                  maximum speed (pixels per iteration)
+              </label>
+
+              <label> motion model
+                  <select id="motionModel">
+                      <option value="mostlyStraight">mostly straight</option>
+                      <option value="flockSimple">flock simple</option>
+                      <option value="follow">follow</option>
+                      <option value="flock">flock</option>
+                      <option value="randomVelocity">random velocity</option>
+                      <option value="randomWalk">random walk</option>
+
+                  </select>
+              </label>
+              <label title="">
+                  <input id="visualizeMotionModel" name="visualizeMotionModel" type="checkbox" checked="true">
+                  visualize motion model
+              </label>
+
+          </div>
+      </div>
+
+      <div>
+          <input class="tab" id="copTab" name="tab" type="checkbox">
+          <label class="tab block" for="copTab"> Cop Information </label>
+          <div class="tab">
+              <label>
+                  <input id="snapshots" name="snapshots" type="text" size="3" value="2000">
+                  link capacity: snapshots sendable per broadcast cycle
+              </label>
+
+              <label title="Show as a moving line graph as percentage of total capacity, red = collisions.">
+                  <input id="showCapacity" name="showCapacity" type="checkbox" checked="true">
+                  show capacity
+              </label>
+
+              <label title="Show red circles with radius proportional to the number of collisions.">
+                  <input id="showCollisions" name="showCollisions" type="checkbox" checked="false">
+                  show collisions
+              </label>
+
+              <label title="Make radio distance smaller than normal if in a crowd.">
+                  <input id="dynamicRadioDistance" name="dynamicRadioDistance" type="checkbox" checked="false">
+                  dynamic radio distance
+              </label>
+
+              <label title="Show node 0's cop table.">
+                  <input id="showCop" name="showCop" type="checkbox">
+                  show cop
+              </label>
+
+              <label title="Show node connections.">
+                  <input id="showPaths" name="showPaths" type="checkbox" checked="true">
+                  show paths
+              </label>
+
+              <label style="display:none" title="Number of times to overhear a snapshot before not repeating it.">
+                  <input id="maxRepeats" name="maxRepeats" type="text" size="3" value="3">
+                  max repeats (not implemented)
+              </label>
+
+              <label style="display:none" title="If a snapshot has not been heard in the expected interval, rebroadcast. This is the number of such intervals that must pass in order to force rebroadcast.">
+                  <input id="repeatCycle" name="repeatCycle" type="text" size="3" value="2">
+                  repeat cycle (not implemented)
+              </label>
+
+              <label title="test for senting snapshot = distance * random() * sensitivity < 1.">
+                  <input id="distanceSensitivity" name="distanceSensitivity" type="text" size="3" value="1">
+                  distance sensitivity
+              </label>
+          </div>
+      </div>
+      <div>
+          <input class="toggle tab" id="messagingTab" name="tab" type="checkbox">
+          <label class="tab block" for="messagingTab"> Messaging </label>
+          <div class="tab">
+
+              <label>
+                  <input id="messages" name="messages" type="text" size="3" value="2000">
+                  link capacity: messages sendable per broadcast cycle
+              </label>
+              <label title="Percentage of nodes that decide each cycle to message node 0 via broadcast with hop-count pruning.">
+                  <input id="topoSend" name="topoSend" type="range" min="0" max="100" value="100">
+                  <output for="topoSend" id="topoSendOut"></output> per thousand message origination rate
+              </label>
+              <label title="Number of extra hops a message is allowed when sent.">
+                  <input id="surplusHops" name="surplusHops" size="3" type="text" value="0">
+                  surplus hops
+              </label>
+              <label title="Show message paths.">
+                  <input id="showMsgPaths" name="showMsgPaths" type="checkbox" checked="true">
+                  show message paths
+              </label>
+
+
+          </div>
+      </div>
+      <div>
+          <input class="toggle tab" id="outputTab" name="tab" type="checkbox">
+          <label class="tab block" for="outputTab"> Output </label>
+          <div class="tab">
+              <label>
+                  <output id="time"></output> time
+              </label>
+
+              <label>
+                  <output id="collisions"></output> collisions
+              </label>
+
+              <label>
+                  <output id="collisionsPerNode"></output> collisions per node
+              </label>
+
+              <label>
+                  <output id="copTableSize"></output> cop table size
+              </label>
+
+              <label style="display:none">
+                  <output id="snapshotsSentPerNode"></output> snapshots sent per node (not implemented)
+              </label>
+
+              <output id="msgStatus"></output>
+          </div>
+      </div>
+  </div>
+</form>
+<!-- <script src="http://d3js.org/d3.v3.min.js"></script>  -->
+<script src="d3.v3.min.js"></script>
+<script src="cop.js"></script>
+<script>
+  window.onload = window.onresize = setup;
+</script>
+<style>
+    html, body { background: white; margin: 0; padding:0; }
+    canvas { position: absolute; outline: 0px solid red; z-index: 0;}
+    #canvas2 { z-index: 1; }
+    form { display: block; position: absolute; z-index: 2; opacity: .9;}
+    input[type=checkbox].toggle { display:none; }
+    input[type=radio].toggle { display:none; }
+    label.tab {display: inline-block; }
+    label.tab.block {display: block; }
+    label:hover {color: red; }
+    label { display: block; cursor: pointer; }
+    label.on, div.on, span.on {display:none}
+    label[name=stopped] {color: green;}
+    label[name=started] {color: red;}
+    input.toggle:checked ~ .on, input.toggle:checked ~ div.on, .off {display:inline-block}
+    input.toggle:checked ~ .off {display:none}
+    input.toggle.tab ~ div { display:none; }
+    input.toggle.tab:checked ~ div { display:block; }
+    .togglebutton {display:block; background: rgba(200,200,255,.2); }
+    .togglebutton  label { display: inline-block; }
+    .togglebutton  label.on {display: none;}
+    .tabs { background: #eef; }
+
+    input.tab { display:none; }
+    input.tab ~ div.tab { display:none;}
+    input.tab ~ label.tab { background: rgba(228,228,255,.2); border-top: 1px solid black; }
+    input.tab:checked ~ label.tab {  }
+    input.tab:checked ~ div.tab { display:block;  }
+</style>
+
+</body></html>
