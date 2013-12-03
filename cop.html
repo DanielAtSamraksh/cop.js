@@ -7,11 +7,11 @@
 <body>
 <!-- <canvas id="canvas"></canvas> -->
 <canvas id="canvas2"></canvas>
-<form oninput="updateForm();" >
+<form oninput="updateForm(); return false;" >
   <div class="togglebutton inlineContents">
       <label for="control">Toggle Controls</label>
       |
-      <input class="toggle" id="stop" type="checkbox" checked="false">
+      <input class="toggle" id="stop" type="checkbox" checked>
       <label class="off" for="stop" name="started" class="togglebutton"> Stop </label>
       <label class="on" for="stop" name="stopped" class="togglebutton"> Start </label>
       <span class="on"> | <label onclick="runEventQ();"> Step </label> </span>
@@ -27,7 +27,7 @@
           <label class="tab block" for="groundTab"> Ground </label>
           <div class="tab">
               <label>
-                  <input id="num" name="num" value="500" size="3" type="text">
+                  <input id="num" name="num" value="700" size="3" type="text">
                   nodes
               </label>
 
@@ -42,7 +42,7 @@
               </label>
 
               <label>
-                  <input id="maxSpeed" name="maxSpeed" size="3" type="text" value="5">
+                  <input id="maxSpeed" name="maxSpeed" size="3" type="text" value="1">
                   maximum speed (pixels per iteration)
               </label>
 
@@ -58,8 +58,12 @@
                   </select>
               </label>
               <label title="">
-                  <input id="visualizeMotionModel" name="visualizeMotionModel" type="checkbox" checked="true">
+                  <input id="visualizeMotionModel" name="visualizeMotionModel" type="checkbox" >
                   visualize motion model
+              </label>
+              <label title="Show each node's network capacity">
+                  <input id="visualizeCapacity" name="visualizeCapacity" type="checkbox">
+                  visualize capacity
               </label>
 
           </div>
@@ -75,27 +79,32 @@
               </label>
 
               <label title="Show as a moving line graph as percentage of total capacity, red = collisions.">
-                  <input id="showCapacity" name="showCapacity" type="checkbox" checked="true">
+                  <input id="showCapacity" name="showCapacity" type="checkbox" checked >
                   show capacity
               </label>
 
               <label title="Show red circles with radius proportional to the number of collisions.">
-                  <input id="showCollisions" name="showCollisions" type="checkbox" checked="false">
+                  <input id="showCollisions" name="showCollisions" type="checkbox" >
                   show collisions
               </label>
 
               <label title="Make radio distance smaller than normal if in a crowd.">
-                  <input id="dynamicRadioDistance" name="dynamicRadioDistance" type="checkbox" checked="false">
+                  <input id="dynamicRadioDistance" name="dynamicRadioDistance" type="checkbox" checked>
                   dynamic radio distance
               </label>
 
+              <label style="display:none" title="The radio distance will be adjusted to have this many neighbors.">
+                  <input id="radioDistanceNeighbors" name="radioDistanceNeighbors" type="text" size="3" value="3">
+                  number of neighbors
+              </label>
+
               <label title="Show node 0's cop table.">
-                  <input id="showCop" name="showCop" type="checkbox">
+                  <input id="showCop" name="showCop" type="checkbox" >
                   show cop
               </label>
 
               <label title="Show node connections.">
-                  <input id="showPaths" name="showPaths" type="checkbox" checked="true">
+                  <input id="showPaths" name="showPaths" type="checkbox" checked>
                   show paths
               </label>
 
@@ -119,6 +128,10 @@
           <input class="toggle tab" id="messagingTab" name="tab" type="checkbox">
           <label class="tab block" for="messagingTab"> Messaging </label>
           <div class="tab">
+              <label title="Watch detailed progress of one message.">
+                  <input id="traceMessage" name="traceMessage" type="checkbox" checked >
+                  trace a message
+              </label>
 
               <label>
                   <input id="messages" name="messages" type="text" size="3" value="2000">
@@ -133,7 +146,7 @@
                   surplus hops
               </label>
               <label title="Show message paths.">
-                  <input id="showMsgPaths" name="showMsgPaths" type="checkbox" checked="true">
+                  <input id="showMsgPaths" name="showMsgPaths" type="checkbox" checked>
                   show message paths
               </label>
 
@@ -180,6 +193,7 @@
     canvas { position: absolute; outline: 0px solid red; z-index: 0;}
     #canvas2 { z-index: 1; }
     form { display: block; position: absolute; z-index: 2; opacity: .9;}
+    form:hover { background: white; }
     input[type=checkbox].toggle { display:none; }
     input[type=radio].toggle { display:none; }
     label.tab {display: inline-block; }
