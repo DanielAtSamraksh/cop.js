@@ -108,6 +108,11 @@
                   show paths
               </label>
 
+              <label title="Start with all the cop tables filled in. Useful for quicker start.">
+                  <input id="startCopKnown" name="startCopKnown" type="checkbox" checked>
+                  start with cop tables filled
+              </label>
+
               <label style="display:none" title="Number of times to overhear a snapshot before not repeating it.">
                   <input id="maxRepeats" name="maxRepeats" type="text" size="3" value="3">
                   max repeats (not implemented)
@@ -121,6 +126,11 @@
               <label title="test for senting snapshot = distance * random() * sensitivity < 1.">
                   <input id="distanceSensitivity" name="distanceSensitivity" type="text" size="3" value="1">
                   distance sensitivity
+              </label>
+
+              <label title="if a cop row has been passed over too many times, broadcast it.">
+                  <input id="randomCutoff" name="randomCutoff" type="checkbox" checked>
+                  random cutoff
               </label>
           </div>
       </div>
