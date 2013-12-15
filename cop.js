@@ -13,6 +13,41 @@ function min(x, y) { return Math.min.apply(null, arguments); }
 function swap(arr, x, y) { var t = arr[x]; arr[x] = arr[y]; arr[y] = t; }
 function random() { return Math.random(); }
 
+function keys(obj) {
+  var ks = [];
+  for (var k in obj) ks.push(k);
+  return ks;
+}
+
+
+// shallow copy object
+function copyo(src, dest) {
+  if (dest === undefined) dest = {};
+  for (var k in src)
+    if (src.hasOwnProperty(k))
+        dest[k] = src[k];
+  return dest;
+}
+
+// deep copy object
+function copyo2(src, dest) {
+  if (dest === undefined) dest = {};
+  for (var k in src) {
+    if (src.hasOwnProperty(k)) {
+      dest[k] = typeof src[k] == "object"? copyo2(src[k]): src[k];
+    }
+  }
+  return dest;
+}
+
+
+
+function counto(o) {
+    var c = 0;
+    for (var i in o) c++;
+    return c;
+}
+
 // heap
 function heapify(arr, cmp) {
   if (!cmp) throw "missing cmp";
@@ -119,6 +154,7 @@ LimitedSizeSet.prototype = {
 
 function timecmp(a, b) { return a.time - b.time; }
 var time=0; // global time
+var lastUpdate = 0; // time of the last update
 var eventQ = new Heap(timecmp);
 
 function runEventQ() {
@@ -127,7 +163,7 @@ function runEventQ() {
     var event = eventQ.pop();
     time = event.time;
     event.action();
-  } while (!event.isMove)
+  } while (!event.isMove);
   return isStopped();
 }
 
@@ -142,6 +178,18 @@ function moveParticles(){
     });
     step();
   }
+}
+
+var _started = false;
+function warmStart() {
+  if (_started) return false;
+  if (startCopKnown && lastUpdate + 3 > time) {
+    // console.log("warmStart = true");
+    return true;
+  }
+  console.log("warmStart over: time now=", time, "last update=", lastUpdate);
+  _started = true;
+  return false;
 }
 
 function sendSnapshots(p) {
@@ -162,8 +210,8 @@ function sendSnapshots(p) {
                  action: sendSnapshots(p)});
 
     // maybe generate our own message
-    if (!traceMessage() && topoSend > 0 && Math.random() < topoSend) {
-      // console.log("generating a new message");
+    if (!warmStart() && !traceMessage() && topoSend > 0 && Math.random() < topoSend) {
+      console.log(p.i, "sendSnapshot: generating a new message");
       var m = generateMessage(p);
       if (m) {
         p.msgsOut[m.msgid] = m;
@@ -176,16 +224,16 @@ function sendSnapshots(p) {
 }
 
 function receivePackets(p, deltaTime) {
-  // console.log("At time "+time+" receivingMessage in "+deltaTime);
+  // console.log("At time "+time+" receivePackets in "+deltaTime);
   var name = "receivePackets "+random();
   eventQ.push({
     time: time + deltaTime,
     name: name,
     action: function() {
-      // console.log("receivingMessage");
+      // console.log(p.i, "receivePackets at time ", time);
       // this may be a phantom particle, if the particles variable has been recalculated.
       if (particles[p.i] != p) {
-        console.log("receivingMessage: phantom particle in "+p.i);
+        // console.log("receivingMessage: phantom particle in "+p.i);
         return;
       }
       p.emptyPacketQ();
@@ -206,9 +254,18 @@ function receivePackets(p, deltaTime) {
 
 
 function drawMessage(p, msg) {
+  if (msg.correcting) {
+    drawCircle(p, 6, "rgb(100, 0, 0)");
+    return;
+  }
   drawCircle(p, 8, "red"); // destination
   drawCircle(particles[msg.src], 8, "green"); // source
-  drawLink("message", particles[msg.via], p);
+  for (var dest in msg.paths)
+    for (var src in msg.paths[dest])
+      drawLink("message", particles[src], particles[dest]);
+  if (msg.paths[p.i])
+    for (var src in msg.paths[p.i])
+      drawLink("message", particles[src], p);
   /*
   for (var dest in msg.paths)
     for (var src in msg.paths[dest]) {
@@ -231,56 +288,214 @@ var linkInfo = {
   snapshot: {color: "rgba(100,100,100,.5)" /* light gray*/, precedence: 1}
 };
 function drawLink(type, p1, p2) {
+  // if (type=="message") console.log("drawLink:", p1.i, p2.i);
+
   if (!(type in linkInfo)) throw "unknown link type";
   var k = p1.x+","+p1.y+","+p2.x+","+p2.y;
-  var existingLink = drawnLinks[k];
-  if (existingLink && linkInfo[existingLink].precedence > linkInfo[type].precedence)
+  var existingLinkType = drawnLinks[k];
+  if (existingLinkType && linkInfo[existingLinkType].precedence > linkInfo[type].precedence)
     return;
   drawnLinks[k] = type;
   drawLine(p1, p2, linkInfo[type].color);
 }
 function clearLinks() { oldDrawnLinks = drawnLinks; drawnLinks = {}; }
 
+/*
+Maxims:
+1) Track the best.
+2) Help if you can.
+3) Stop when you hear better.
+4) Respond to worse with your best.
+
+Discussion:
+For each msgid a hears, the node tracks the "best" version.
+
+The best may be an externally-generated message, or an internally generated one.
+If it can help pass along the best version it will do so.
+
+"Stop when you hear better."
+
+As long as the best message is internally generated,
+the node will continue broadcasting it.
+
+When the best message is external, it will stop.
+
+This ensures that messages always make progress.
+
+"Respond to worse with your best."
+
+To avoid over-transmission, when a node hears a message that is not the best,
+it will broadcast it's best, in hope of correcting the ignorant.
+
+When the ignorant node hears the better message, it stop (applying maxim 1.)
+
+*/
 function receiveMsgs(p, msgs) {
   // msgs = [{dest, src, hops, ts, msgid, via}]
   // console.log("receiveMsgs for "+p.i);
-  msgs.forEach(
-    function(m) {
-      if (m.src == p.i) return; // from here
-      var accept = p.msgFilter(m);
-      console.log(accept, m);
-      if (!accept) return; // already done with this
-      if (m.expiration < time) return; // already expired
-      if (!(m.dest in p.cop)) return; // unknown destination
-      if (m.dest == p.i) {  // one way or round trip
-        if ( m.ack ) { // round trip
-          // we sent this message
-          console.log("ROUND TRIP COMPLETE! ", m, m.msgid, " message paths", m.paths, "expiration", m.expiration, "time", time);
+  for (var msgid in msgs) {
+    var m = msgs[msgid];
+    if (m.expiration < time) {
+      console.log(p.i, "receiveMsgs: Received expired msg.", m)
+      if (p.msgsOut[m.msgid] && p.msgsOut[m.msgid].expiration < time) {
+        delete p.msgsOut[m.msgid];
+        console.log(p.i, "receiveMsgs: Remove expired msg.", m)
+      }
+      continue;
+    }
+
+    // Track the best that we've seen: did the best change?
+    var best = p.bestMsgs[msgid];
+    // if 1st time or 1st reply
+    if (!best || !best.ack && m.ack) {
+      best = copyo2(m);
+      best.via = p.i;
+      if (m.dest == p.i && m.ack) {
+        console.log(p.i, "receiveMsgs: ROUND TRIP", best);
+        best.hops = 0;
+      }
+    }
+    // a (possibly faulty) best exists, add path info
+    if (!best.paths[p.i]) best.paths[p.i] = {};
+    best.paths[p.i][m.via] = true;
+    best.correcting = undefined;
+    // one way
+    if (p.i == best.dest && !best.ack) {
+      console.log(p.i, time, "receiveMsgs: ONE WAY", m);
+      best.dest = m.src;
+      best.src = m.dest;
+      best.ack = true;
+      best.hops = p.cop[best.dest] && p.cop[best.dest].hops || 0;
+      best.expiration = time + best.hops;
+      if (_tracingMessage && _tracedMessage.msgid == best.msgid) _tracedMessage = best;
+      console.log(p.i, "receiveMsgs: making new return message", m, best);
+    }
+    // tighten hops
+    if (m.hops < best.hops && m.ack == best.ack) {
+      best.hops = m.hops;
+    }
+    if (p.cop[best.dest] && p.cop[best.dest].hops < best.hops) {
+      best.hops = p.cop[best.dest].hops;
+    }
+    // save best
+    p.bestMsgs[msgid] = best;
+    // help if possible
+    if (m.ack != best.ack || m.hops > best.hops) {
+      p.msgsOut[m.msgid] = best;
+    }
+    else {
+      delete p.msgsOut[msgid];
+    }
+  }
+}
+    /*
+    if (!best) {
+      if (p.i != m.dest) {
+        console.log(p.i, "receiveMsgs: updating best ", m);
+        best = p.bestMsgs[msgid] = copyo2(m);
+      }
+      else if (m.ack) {
+        console.log("Round Trip", m);
+        best = p.bestMsgs[msgid] = copyo2(m);
+      }
+      else {
+        console.log(p.i, "receiveMsgs: One Way", m);
+        if (p.cop[m.src]) {
+          best = p.bestMsgs[msgid] =
+            copyo({dest: m.src, src: m.dest, ack: true, via: p.i, hops: p.cop[m.src].hops},
+                  copyo2(m));
+          best.expiration = time + best.hops;
+          if (_tracingMessage && _tracedMessage.msgid == best.msgid) _tracedMessage = best;
+          console.log(p.i, "receiveMsgs: making new return message", m, best);
         }
-        else { // one-way; return the message (reply)
-          console.log("ONE WAY COMPLETE", m, m.msgid, " message paths", m.paths, "expiration", m.expiration, "time", time);
-          p.msgsOut[m.msgid] = m = copyo2(m);
-          if (!m.paths[p.i]) m.paths[p.i] = {};
-          m.paths[p.i][m.via] = 1;
-          m.ack = true;
-          var x = m.src; m.src = m.dest; m.dest = x;
-          m.hops = p.cop[m.dest]? p.cop[m.dest].hops + surplusHops: maxHops;
-          m.hops_ts = p.cop[m.dest]? p.cop[m.dest].ts: 0;
-          m.expiration = time + m.hops;
-          return;
+        else {
+          best = copyo2(m);
+          console.log(p.i, "receiveMsgs: Can't return because dest does not know the source.", m, best);
         }
       }
-      // add message m to msgOut
-      p.msgsOutAdd(m);
-      // if (m.traced || showMsgPaths) {
-        // console.log("Traced message", m,"at",p.i, p);
-        // drawMessage(p, m);
-      // }
-      // if (0 && showMsgPaths) addPath(p.i, m.via, (m.dest != 0? {msgReturn: 1}: {msgSend: 1}), m.via_x, m.via_y );
-    });
-  // for (var dummy in p.msgsOut) { p.sendMessages(); break; } // immediately forward messages
-}
+    }
+    else if (m.ack && !best.ack // previous best was forwarding and now the message is returning.
+             || m.ack == best.ack // or same direction and new msg is better
+             && m.hops < best.hops) { // todo: change hops to a better measure that takes into consideration probabilities
+      if (p.i == m.dest) {
+        if (m.ack) {
+          console.log("Round trip", m);
+        }
+        else {
+          console.log("One Way", m);
+        }
+      }
+      console.log(p.i, "receiveMsgs: updating best from ", best);
+      best = p.bestMsgs[msgid] = copyo2(m);
+      console.log(p.i, "receiveMsgs: updated best ", best);
+    }
+    else {
+      console.log(p.i, "receiveMsgs: best for this message is unchanged", m, best);
+    }
+    if (p.i == best.dest
+        || p.i == best.src
+        || p.cop[best.dest]
+        && p.cop[best.dest].hops < m.hops) {
+      if (!best.paths[p.i]) best.paths[p.i] = {};
+      best.paths[p.i][m.via] = true;
+      best.via = p.i;
+      best.hops = p.i==best.dest? 0: Math.min(m.hops, p.cop[best.dest].hops);
+    }
+    best.correcting = undefined;
 
+
+
+    var m2; // temp variable
+
+    // Help if you can.
+    if (p.i == best.src) { // reached destination and turning around
+      console.log(p.i, "receiveMsgs: Turning around ", m, best);
+      p.msgsOut[m.msgid] = best;
+    }
+    else if (p.i == best.dest && (!p.msgsOut[msgid] || !p.msgsOut[msgid].correcting)) {
+      console.log(p.i, "receiveMsgs: Received a round-trip reply, so stop sending the msg", m, p.msgsOut[msgid]);
+      delete p.msgsOut[msgid];
+    }
+    else if (p.i != best.dest // if message has not reached it's destination
+             && (p.cop[best.dest] // and we're closer than the sender of the msg
+             && p.cop[best.dest].hops < m.hops
+             || p.i == best.src)) { // or we are the src
+      // note that we update our best
+      m2 = p.msgsOut[m.msgid] = best = p.bestMsgs[msgid] = copyo2(m);
+      m2.via = p.i;
+      m2.hops = p.cop[best.dest].hops;
+      if (!m2.paths[p.i]) m2.paths[p.i] = {};
+      m2.paths[p.i][m.via] = true;
+      console.log(p.i, "receiveMsgs: Helping with our best ", m, best);
+    }
+    // If you hear worse, send your best
+    else if (!p.msgsOut[msgid]
+             && (!m.ack && best.ack
+                 || m.hops > best.hops)) {
+      console.log(p.i, "receiveMsgs: heard worse, sending our best.", m, best);
+      var m2 = p.msgsOut[msgid] = copyo(best); // shallow copy is ok
+      m2.correcting = time+2;
+    }
+    // stop if you see better or if you were correcting
+    else if ((m2 = p.msgsOut[msgid]) &&
+             (!m2.correcting && best.via != p.i)) {
+      console.log(p.i, "receiveMsgs: removing from msgsOut because the we've seen better ", m2, best);
+      delete p.msgsOut[msgid];
+    }
+    else if ((m2 = p.msgsOut[msgid])
+             && m2.correcting && m2.correcting < time) {
+      console.log(p.i, "receiveMsgs: removing from msgsOut because the we were just correcting ", m2, best);
+      delete p.msgsOut[msgid];
+    }
+    else if (p.msgsOut[msgid]) {
+      console.log(p.i, "receiveMsgs: Already forwarding this message", m, best, p.msgsOut[msgid]);
+    }
+    else {
+      console.log(p.i, "receiveMsgs: Can't help, correct, or stop. Doing nothing ", m, best);
+    }
+  }
+}
+*/
 
 
 function getSnapshots(p) {
@@ -350,8 +565,12 @@ function getMsgs(p) {
   for (var msgid in p.msgsOut) {
     var m = p.msgsOut[msgid];
     // drawMessage(p, m);
-    if (!p.msgFilter(p.msgsOut[msgid])) delete p.msgsOut[msgid];
-    else notEmpty = true;
+    if (m.expiration < time) {
+      console.log(p.i, "getMsgs: removing expired msg", m);
+      delete p.msgsOut[msgid];
+      continue;
+    }
+    notEmpty = true;
   }
   // if (notEmpty) console.log("getMsgs returning ", p.msgsOut);
   return p.msgsOut;
@@ -385,8 +604,8 @@ function generateMessage(p) {
   }
   */
   msg.expiration = time + msg.hops;
-  registerMsgStart(msg);
-  p.messaging[0] = true;
+  // registerMsgStart(msg);
+  // p.messaging[0] = true;
   return msg;
 }
 
@@ -416,6 +635,8 @@ var closedWorld = true;
 
 var randomCopTable, randomCopTableSize; // from the first (it's random) particle
 
+
+/*
 // create a message filter
 // A message filter is passed every message that is received and sent
 // and it has returns true if that message can be passed on
@@ -431,11 +652,69 @@ function messageFilter(p) {
 
     // filter out messages that are going too far, or that we don't know where they are going
     if (messageExpired(m)) {
-      console.log("rejecting expired message ", m, time, m.expiration);
+      console.log(p.i, "rejecting expired message ", m.msgid, time, m.expiration);
       return false;
     }
     // console.log(m, "not expired");
     var best = messages[m.msgid]; // the existing record is the best we have
+    function replaceBest(){
+      console.log(p.i, "replacing the previous best message ", best, " with ", m);
+      messages[m.msgid] = m;
+      expiredHeap.push(m);
+      if (p.i == m.src || p.i == m.via) {
+        console.log(p.i, "accept this message because we are sending it", m);
+        return true;
+      }
+      if (p.cop[m.dest] && p.cop[m.dest].hops < m.hops) {
+        console.log(p.i, "accept this message because we can deliver it within the required hops");
+        return true;
+      }
+      console.log(p.i, "reject this message because we are not sending it and we cannot deliver it within the required hops.");
+      return false;
+    }
+    if (!best) {
+      console.log(p.i, "no record of this message msgid ", m.msgid);
+      return replaceBest();
+    }
+    if (!best.ack && m.ack) {
+      console.log(p.i, "the best was forwarding, now we are returning", m.msgid);
+      return replaceBest();
+    }
+    if (best.ack == m.ack) {
+      console.log(p.i, "the best and this message are going in the same direction", m.msgid);
+      if (best.dest != p.i) {
+        console.log(p.i, "and we are not the destination", m.msgid);
+        if (best.hops > m.hops) {
+          console.log(p.i, "and the best allowed more hops", best.hops, m.hops, m.msgid);
+          return replaceBest();
+        }
+        if (best.hops == m.hops && best.via == p.i) {
+          console.log(p.i, "and the number of hops is the same as the best and the best was a message we sent", m.msgid);
+          return replaceBest();
+        }
+      }
+    }
+    if (best.ack && !m.ack) {
+      console.log(p.i, "reject this message because is is still forwarding while best was returning.", m.msgid);
+      return false;
+    }
+    if (best.ack != m.ack) {
+      throw "bad case";
+    }
+    if (best.dest == p.i) {
+      console.log(p.i, "reject this message because the destination has already been reached.", m.msgid);
+      return false;
+    }
+    if (best.hops < m.hops) {
+      console.log(p.i, "reject this message because the best has fewer hops.", m.msgid);
+      return false;
+    }
+    if (best.hops == m.hops && best.via != p.i) {
+      console.log(p.i, "reject this message because the best has the same number of  hops and it was foreign.", m.msgid);
+      return false;
+    }
+    throw "Bad case";
+
     // accept the new message and replace the existing record if ...
     if (!best // we don't have anything yet
         || !best.ack && m.ack // or the best was going and now we're returning
@@ -446,8 +725,10 @@ function messageFilter(p) {
             && best.via == p.i)) { // and the best was one of our own.
       messages[m.msgid] = m;
       expiredHeap.push(m);
-      var r = p.i == m.src || p.cop[m.dest] && p.cop[m.dest].hops < m.hops;
-      console.log(p, "replaced best with ", m, " returning ", r);
+      var r = p.i == m.src
+        || p.i == m.via
+        || p.cop[m.dest] && p.cop[m.dest].hops < m.hops;
+      // console.log(p, "replaced best with ", m, " returning ", r);
       return r;
     }
     // reject the new message if ...
@@ -465,6 +746,7 @@ function messageFilter(p) {
     throw "bad case";
   }
 }
+*/
 
 function randomParticle(notZero) {
   if (!particles.length) throw "No particles!";
@@ -490,12 +772,13 @@ function traceMessage(start) {
     _tracedMessage = generateMessage(p);
     _tracedMessage.traced = true;
     p.msgsOutAdd(_tracedMessage);
-    // console.log("traceMessage started ", p, _tracedMessage);
+    console.log("traceMessage started ", p, _tracedMessage);
 
   }
   if (start !== undefined && !start) {
     _tracingMessage = false;
   }
+  if (warmStart()) return false;
   return _tracingMessage;
 }
 
@@ -612,6 +895,23 @@ function drawMsgStatus() {
 
 }
 
+function showNeighborhoods(c) {
+  console.log("showNeighborhoods");
+  if (!c) c = ctx2;
+  if (neighborhoodsInRow)
+  for (var i = 0; i < neighborhoodsInRow; i += 1) {
+    var j = i * radioDistance;
+    // console.log("drawing column", i)
+    drawLine({x:j, y:0}, {x:j, y: height}, "gray", c);
+  }
+  if (neighborhoodsInColumn)
+  for (var i = 0; i < neighborhoodsInColumn; i += 1) {
+    var j = i * radioDistance;
+    // console.log("drawing row", i)
+    drawLine({x:0, y:j}, {x:width, y:j}, "gray", c);
+  }
+}
+
 function point2neighborhoodi(p){
     var i = Math.floor(p.x/radioDistance)
        + neighborhoodsInRow * Math.floor(p.y/radioDistance);
@@ -653,13 +953,7 @@ function setNeighborhoods () {
     neighborhoods = new Array(neighborhoodsInColumn * neighborhoodsInRow);
     particles.forEach(function(p, j){
       p.setNeighborhood();
-      return;
-      var i = p.neighborhood = point2neighborhoodi(p);
-      if (!neighborhoods[i]) neighborhoods[i] = {}
-      neighborhoods[i][j] = true;
     });
-    // dumpparticles);
-    // dump(neighborhoods);
 }
 
 function ptIsNaN(p){
@@ -671,7 +965,7 @@ function ptIsNaN(p){
 var maxSpeed;
 var motionModels = { // moves particle according to various motion models
   randomVelocity: function(p){ // pick a destination and velocity and go
-    if (maxSpeed <= 0) return;
+    if (warmStart() || maxSpeed <= 0) return;
     if (ptIsNaN(p.dest) || isNaN(p.speed) || distance(p, p.dest) < p.speed ) {
       randomPt(p.dest);
       p.speed = random() * maxSpeed;
@@ -681,13 +975,13 @@ var motionModels = { // moves particle according to various motion models
     checkBounds(p);
   },
   randomWalk: function(p){
-    if (maxSpeed <= 0) return;
+    if (warmStart() || maxSpeed <= 0) return;
     p.move(randomVelocity());
     motionModels.repel(p);
     checkBounds(p);
   },
   mostlyStraight: function(p){
-    if (maxSpeed <= 0) return;
+    if (warmStart() || maxSpeed <= 0) return;
     if (ptIsNaN(p.dest) || p.distance(p.dest) < radioDistance) {
       p.dest = getNewDest(p);
     }
@@ -706,7 +1000,7 @@ var motionModels = { // moves particle according to various motion models
     checkBounds(p);
   },
   flock: function(p){
-    if (maxSpeed <= 0) return;
+    if (warmStart() || maxSpeed <= 0) return;
     var p_original = { x: p.x, y: p.y };
     // choose a new destination if needed
     if (isNaN(p.x) ) p.x = random() * width;
@@ -763,7 +1057,7 @@ var motionModels = { // moves particle according to various motion models
     }
   },
   follow: function(p) {
-    if (maxSpeed <= 0) return;
+    if (warmStart() || maxSpeed <= 0) return;
     var p_original = { x: p.x, y: p.y };
     // choose a new destination if needed
     if (ptIsNaN(p) ) p.x = random() * width, p.y = random() * height;
@@ -801,7 +1095,7 @@ var motionModels = { // moves particle according to various motion models
     }
   },
   flockSimple: function(p) {
-    if (maxSpeed <= 0) return;
+    if (warmStart() || maxSpeed <= 0) return;
     var p_original = { x: p.x, y: p.y };
     // choose a new destination if needed
     if (ptIsNaN(p) ) p.x = random() * width, p.y = random() * height;
@@ -826,7 +1120,8 @@ var motionModels = { // moves particle according to various motion models
     }
   },
   repel: function(p) {
-    if (p.stinky) {
+    if (warmStart() || maxSpeed <= 0) return;
+    else {
       var ns = p.getNeighbors();
 	    for (var i in ns) {
 	      var n = ns[i];
@@ -867,7 +1162,7 @@ function getRandomPt(){
   };
 }
 function getNewDest(p) {
-  if (height < 4 * radioDistance || width < 4 * radioDistance) {
+  if (height < 4 * radioDistance && width < 4 * radioDistance) {
     throw "radioDistance too big";
   }
   var d = randomPt(), dist = p.distance(d), d2, dist2;
@@ -1019,8 +1314,11 @@ function Particle(i) {
   this.stinky = false;
   this.packets = []; // packets received waiting to be processed
   this.msgsOut = {};
-  this.msgFilter = messageFilter(this);
+  this.bestMsgs = {};
+  // this.msgFilter = messageFilter(this);
   this.messaging = {};
+  this.neighborhoodts = -1;
+  this.neighborhood = null;
   this.setNeighborhood();
   this.capacity = new Capacity(10);
   eventQ.push({time: time + .5 + random(), name: "sendSnapshots", action: sendSnapshots(this)});
@@ -1029,10 +1327,21 @@ function Particle(i) {
 };
 Particle.prototype = {};
 
+Particle.prototype.toString = function() {
+  var p = this;
+  return "Particle "+p.i+ " at "+p.x+","+p.y;
+};
+Particle.prototype.valueOf = function() {
+  var p = this;
+  return "Particle {i:"+p.i+",neighborhood:"+p.neighborhood+"...}";
+};
+
 Particle.prototype.msgsOutAdd = function(m) {
   var p = this;
+  // var existing = !!p.msgsOut[m.msgid];
   var m2 = p.msgsOut[m.msgid] = copyo2(m, p.msgsOut[m.msgid]);
   m2.via = p.i;
+  if (m.via != p.i) m2.hops--;
   if (p.i != m.via) {
     if (!m2.paths[p.i]) m2.paths[p.i] = {};
     m2.paths[p.i][m.via] = 1;
@@ -1041,31 +1350,47 @@ Particle.prototype.msgsOutAdd = function(m) {
 
 Particle.prototype.getNeighbors = function(){
   var p = this;
+
+  // p.getRadioDistance();
+  // return particles
+  //  .map(function(p2){return {p:p2, d: distance(p, p2)};})
+  //  .filter(function(t){return t.p.i != p.i && t.d <= p.radioDistance;})
+  //  .sort(function(a,b){return a.d - b.d;})
+  //  .map(function(t){return t.p;});
+
+
   // check cache
-  if (p.neighborsts == time) return p.neighbors;
+  if (p.neighborsts === time && time > 0) return p.neighbors;
+  // if (!neighborhoods.length)  setNeighborhoods();
   p.getRadioDistance();
   var d = p.radioDistance;
   if (d > radioDistance) throw "bad p.radioDistance";
+  // console.log(p.i, time, "getNeightbors: neighborhoods = ", neighborhoods.concat([]));
+
   var neighbors = [], distances = {};
   for (var col = -1; col < 2; col++) {
     for (var row = -1; row < 2; row++) {
       var x = p.neighborhood + col*neighborhoodsInRow + row;
-	      if (x < 0 || x >= neighborhoods.length) continue;
-	      for (var i in neighborhoods[x]) {
+	    if (x < 0 || x >= neighborhoods.length || !neighborhoods[x]) continue;
+      for (var i in neighborhoods[x]) {
+          // console.log(p.i, "getNeighbors: checking", i);
+          if (i == p.i) continue; // skip myself
 		      var p2 = particles[i];
           var d2 = distance(p, p2);
 		      if (d2 > d) continue;
-		      if (p == p2) continue;
 		      neighbors.push(p2);
           distances[p2.i] = d2;
         }
     }
   }
+  // console.log(p.i, time, "getNeighbors presort", neighbors.length, neighbors, p.neighborsts);
   neighbors.sort(function(a, b) {return distances[a.i] - distances[b.i]; });
   // cache
   p.neighbors = neighbors;
   p.neighborsts = time;
   p.distances = distances;
+  // console.log(p.i, time, "getNeighbors", neighbors.length, neighbors, p.neighborsts);
+
   return neighbors;
 };
 
@@ -1084,11 +1409,16 @@ Particle.prototype.distance = function(p) {
 
 Particle.prototype.setNeighborhood = function () {
   var p = this;
-  if (p.neighborhoodts == time) return;
+  // console.log(p.i, "at time", time, "setNeighborhood", p.neighborhood, p.neighborhoodts);
+  if (p.neighborhoodts == time && time > 0) return;
 
   // set new neighborhood
   var new_neighborhood = point2neighborhoodi(p);
-  if (p.neighborhood != new_neighborhood
+  if (p.neighborhood == new_neighborhood
+      && neighborhoods[new_neighborhood]
+      && neighborhoods[new_neighborhood][p.i]) return;
+  if (p.neighborhood
+      && p.neighborhood != new_neighborhood
       && neighborhoods[p.neighborhood]
       && neighborhoods[p.neighborhood][p.i]) {
 	  delete neighborhoods[p.neighborhood][p.i];
@@ -1099,6 +1429,7 @@ Particle.prototype.setNeighborhood = function () {
 	neighborhoods[new_neighborhood][p.i]=true;
 	p.neighborhood = new_neighborhood;
   p.neighborhoodts = time;
+  // console.log(p.i, time, "setNeighborhood: neighborhood", p.neighborhood, p.neighborhoodts);
 };
 
 Particle.prototype.move = function(v) {
@@ -1133,14 +1464,11 @@ Particle.prototype.toJSON = function() {
 
 Particle.prototype.emptyPacketQ = function (){
   var p = this;
-  // console.log("emptyPacketQ");
+  // console.log(p.i, "at time", time, "emptyPacketQ", p.packets.length, copyo(p.packets));
   // read packets
-  while (p.packets.length && p.packets[0].ts + p.packets[0].len < time) {
+  while (p.packets.length && p.packets[0].ts + p.packets[0].len <= time) {
     var m = p.packets.shift(); // this message completed in the past
-    if (m.skip) { // remove this if it's not used
-      throw "used skip";
-      continue;
-    }
+    // console.log(p.i, "at time", time, "emptyPacketQ, looking at packet", m);
     var collidedLen = 0;
     while (p.packets.length) { // check for collisions
       if (p.packets[0].ts >= m.ts + (collidedLen || m.len)) break; // next message begins after this one ends
@@ -1149,27 +1477,32 @@ Particle.prototype.emptyPacketQ = function (){
       collidedLen = Math.max( m.len, m2.ts - m.ts + m2.len, collidedLen );
     }
     if (collidedLen) {
+      // console.log(p.i, "at time", time, "emptyPacketQ: collided packet", m);
       if (!m.collided) m = copyo(m); // writing to a pkt requires a copy, but only copy fresh packets
       m.collided = true;
       m.len = collidedLen;
     }
     if (m.ts + m.len > time) {
       // current message spans messages still unfinished, put it back on the pkt queue
+      // console.log(p.i, "at time", time, "emptyPacketQ: unfinished packet", m.ts, m.len, m.ts + m.len, time, m);
       p.packets.unshift(m);
       return;
     }
     registerCapacity(p, m);
     if ( m.collided ) continue;
-    if ( m.src == p.i ) continue;
-    // processMessage(p, m); // reproduced below
-    // console.log(p.i+ " processing message from "+m.src);
+    if ( m.src == p.i ) {
+      // console.log(p.i, "at time", time, "emptyPacketQ: skipping packet from myself", m);
+      continue;
+    }
+    // console.log(p.i+ " processing packet from "+m.src);
     if (m.snapshots && m.snapshots.length) {
-      // console.log("emptyPacketQ: receiving snapshots");
+      // console.log(p.i, "at time", time, "emptyPacketQ: receiving snapshots");
       p.receiveSnapshots(m.snapshots);
     }
-    if (m.msgs && m.msgs.length) {
-      // console.log("emptyPacketQ: receiving msg");
+    for (var dummy in (m.msgs || {})) {
+      // console.log(p.i, "at time", time, "emptyPacketQ: receiving msg");
       receiveMsgs(p, m.msgs);
+      break;
     }
   }
 };
@@ -1194,11 +1527,18 @@ Particle.prototype.snapshot = function (i, ideal) {
 
 Particle.prototype.receiveSnapshots = function(snapshots) {
   var p = this;
-  // if (p.i == 0) console.log(snapshots);
+  // if (p.i == 0)
+  // console.log("receiveSnapshots", snapshots);
   snapshots.forEach(
     function(s){
       if (!p.cop[s.i] || p.cop[s.i].ts < s.ts) {
         // not in cop table (we just throw away stale data, this is probably suboptimal)
+        if (!p.cop[s.i]
+            || p.cop[s.i].x != s.x
+            || p.cop[s.i].y != s.y) {
+          // console.log(p.i, "receiveSnapshots: updating cop", time);
+          lastUpdate = time;
+        }
 		    p.cop[s.i] = {
           i:s.i, x:s.x, y:s.y, ts:s.ts,
           seen:1, hops:s.hops+1, passed_over:0
@@ -1208,6 +1548,10 @@ Particle.prototype.receiveSnapshots = function(snapshots) {
 	  	  return;
 	    }
   	  else {
+        if (p.cop[s.i].hops > s.hops+1) {
+          // console.log("receiveSnapshots: updating cop", time);
+          lastUpdate = time;
+        }
 	  	  p.cop[s.i].seen += 1;
 		    p.cop[s.i].hops = Math.min(p.cop[s.i].hops, s.hops+1);
 	    }
@@ -1217,7 +1561,7 @@ Particle.prototype.receiveSnapshots = function(snapshots) {
 // return the next time that it looks like it's safe the transmit.
 Particle.prototype.nextOpenTransmissionTime = function() {
   var p = this;
-  if (p.packets.length == 0) return true;
+  if (p.packets.length == 0) return time;
   var t = 0; // the latest time the channel is busy
   p.packets.forEach(function(m) {
     var t2 = m.ts + m.len;
@@ -1227,7 +1571,7 @@ Particle.prototype.nextOpenTransmissionTime = function() {
 };
 
 Particle.prototype.sendSnapshots = function () {
-  // console.log("sending snapshots");
+  //console.log("sending snapshots");
   var p = this;
   var pkt = {
     ts: time,
@@ -1235,6 +1579,8 @@ Particle.prototype.sendSnapshots = function () {
     snapshots: getSnapshots(p),
     msgs: getMsgs(p)
   };
+  // console.log(p.i, time, "sendSnapshots: sending ", pkt.snapshots.length, " snapshots", pkt.snapshots);
+
   var msglen = 0; for (var dummy in pkt.msgs) msglen++;
   pkt.len = pkt.snapshots.length / snapshotsPerCycle + msglen / messagesPerCycle;
   return p.broadcast(pkt);
@@ -1245,12 +1591,18 @@ Particle.prototype.broadcast = function (pkt) {
   var p = this;
   var nextTime = p.nextOpenTransmissionTime();
   if (nextTime > time) {
+    console.log(p.i, "broadcast at time ", time, "is not possible. Must wait until time", nextTime);
     return nextTime;
   }
-  p.getNeighbors().forEach(function(n){
-    // if (n.i == 0) console.log(p.i," sending to ",n.i, "pkt", pkt);
+  p.getNeighbors().concat([p]).forEach(function(n){
+    // if (n.i == 0)
+    // console.log(p.i,"broadcast: sending to ",n.i, "pkt", pkt);
     if (distance(n, p) > radioDistance) {
       throw "path too long";
+    }
+    for (var dummy in pkt.msgs) {
+      console.log(p.i, "broadcasting messages ", keys(pkt.msgs), " to ", n.i);
+      break;
     }
     n.packets.push(pkt);
     receivePackets(n, pkt.len);
@@ -1259,8 +1611,8 @@ Particle.prototype.broadcast = function (pkt) {
       // addPath(p.i, n.i, {snapshots: 1});
     }
   });
-  p.packets.push(pkt);
-  receivePackets(p, pkt.len);
+  // p.packets.push(pkt);
+  // receivePackets(p, pkt.len);
   return 0;
 };
 
@@ -1281,7 +1633,7 @@ Particle.prototype.sendMessages = function() {
   var nextTime = p.broadcast(pkt);
   if (0 && nextTime) { // retry
     var r = random();
-    console.log("sendMessages: for "+p.i+" at time "+time+": resending at "+nextTime+"+"+r);
+    // console.log("sendMessages: for "+p.i+" at time "+time+": resending at "+nextTime+"+"+r);
     receivePackets(p, nextTime - time + r);
   }
 };
@@ -1389,34 +1741,6 @@ function customRadioDistance(p) {
 	  return p1.distance - p2.distance;
     });
   return Math.min(radioDistance, a[n-1].distance);
-}
-
-// shallow copy object
-function copyo(src, dest) {
-  if (dest === undefined) dest = {};
-  for (var k in src)
-    if (src.hasOwnProperty(k))
-        dest[k] = src[k];
-  return dest;
-}
-
-// deep copy object
-function copyo2(src, dest) {
-  if (dest === undefined) dest = {};
-  for (var k in src) {
-    if (src.hasOwnProperty(k)) {
-      dest[k] = typeof src[k] == "object"? copyo2(src[k]): src[k];
-    }
-  }
-  return dest;
-}
-
-
-
-function counto(o) {
-    var c = 0;
-    for (var i in o) c++;
-    return c;
 }
 
 function getAllNeighbors(p) {
@@ -1624,8 +1948,11 @@ function setup() {
   }) ();
 
   (function() {
+    console.log("check traceMessage");
     var el = document.getElementById("traceMessage");
-    window.setTimeout(function() {traceMessage(el.checked);}, 0);
+    window.setTimeout(function() {
+      console.log("set traceMessage", el.checked);
+      traceMessage(!!el.checked);}, 0);
     el.onchange = function (){
       traceMessage(el.checked);
       return false;
@@ -1715,9 +2042,7 @@ function setup() {
   setNeighborhoodParameters();
   particles = makeParticles();
   setNeighborhoods();
-  if (startCopKnown) {
-    copWarmup();
-  }
+  // if (startCopKnown) {    copWarmup();  }
 
   stink();
 
@@ -1727,7 +2052,7 @@ function setup() {
 //window.setTimeout(step, 1);
 
 function start() { d3.timer(runEventQ); }
-function isStopped() { return document.getElementById("stop").checked; }
+function isStopped() { return document.getElementById("stop").checked && !warmStart(); }
 function fillBlack() { ctx.fillStyle = "rgba(0,0,0,0.5)"; }
 function fillWhite() { ctx.fillStyle = "rgba(255,255,255,0.3)"; }
 function fillGreen() { ctx.fillStyle = "rgba(0,255,0,1)"; }
@@ -2111,7 +2436,7 @@ function updateLocations() {
   clearLinks();
   particles.forEach(function(p, i) {
 	  motionModels[motionModel](p);
-    // if (p.x < 0 || p.y < 0) throw "neg point";
+      // if (p.x < 0 || p.y < 0) throw "neg point";
 	  p.draw();
     // if (p.x < 0 || p.y < 0) throw "neg point";
   });

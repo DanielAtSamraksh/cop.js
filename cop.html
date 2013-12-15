@@ -27,7 +27,7 @@
           <label class="tab block" for="groundTab"> Ground </label>
           <div class="tab">
               <label>
-                  <input id="num" name="num" value="700" size="3" type="text">
+                  <input id="num" name="num" value="20" size="3" type="text">
                   nodes
               </label>
 
@@ -37,7 +37,7 @@
               </label>
 
               <label>
-                  <input id="avgNeighbors" name="avgNeighbors" size="3" type="text" value="5" >
+                  <input id="avgNeighbors" name="avgNeighbors" size="3" type="text" value="7" >
                   average number of neighbors
               </label>
 
@@ -89,7 +89,7 @@
               </label>
 
               <label title="Make radio distance smaller than normal if in a crowd.">
-                  <input id="dynamicRadioDistance" name="dynamicRadioDistance" type="checkbox" checked>
+                  <input id="dynamicRadioDistance" name="dynamicRadioDistance" type="checkbox">
                   dynamic radio distance
               </label>
 
@@ -123,15 +123,16 @@
                   repeat cycle (not implemented)
               </label>
 
+              <label title="if a cop row has been passed over too many times, broadcast it.">
+                  <input id="randomCutoff" name="randomCutoff" type="checkbox" checked>
+                  random cutoff
+              </label>
+
               <label title="test for senting snapshot = distance * random() * sensitivity < 1.">
                   <input id="distanceSensitivity" name="distanceSensitivity" type="text" size="3" value="1">
                   distance sensitivity
               </label>
 
-              <label title="if a cop row has been passed over too many times, broadcast it.">
-                  <input id="randomCutoff" name="randomCutoff" type="checkbox" checked>
-                  random cutoff
-              </label>
           </div>
       </div>
       <div>
@@ -148,7 +149,7 @@
                   link capacity: messages sendable per broadcast cycle
               </label>
               <label title="Percentage of nodes that decide each cycle to message node 0 via broadcast with hop-count pruning.">
-                  <input id="topoSend" name="topoSend" type="range" min="0" max="100" value="100">
+                  <input id="topoSend" name="topoSend" type="range" min="0" max="100" value="0">
                   <output for="topoSend" id="topoSendOut"></output> per thousand message origination rate
               </label>
               <label title="Number of extra hops a message is allowed when sent.">
