@@ -300,6 +300,13 @@ function drawLink(type, p1, p2) {
 }
 function clearLinks() { oldDrawnLinks = drawnLinks; drawnLinks = {}; }
 
+function addToPath(msg, p) {
+  if (msg.via == p.i) return;
+  if (!msg.paths[p.i]) msg.paths[p.i] = {};
+  msg.paths[p.i][msg.via] = true;
+  msg.via = p.i;
+}
+
 /*
 Maxims:
 1) Track the best.
@@ -349,16 +356,12 @@ function receiveMsgs(p, msgs) {
     // if 1st time or 1st reply
     if (!best || !best.ack && m.ack) {
       best = copyo2(m);
-      best.via = p.i;
+      addToPath(best, p);
       if (m.dest == p.i && m.ack) {
         console.log(p.i, "receiveMsgs: ROUND TRIP", best);
         best.hops = 0;
       }
     }
-    // a (possibly faulty) best exists, add path info
-    if (!best.paths[p.i]) best.paths[p.i] = {};
-    best.paths[p.i][m.via] = true;
-    best.correcting = undefined;
     // one way
     if (p.i == best.dest && !best.ack) {
       console.log(p.i, time, "receiveMsgs: ONE WAY", m);
@@ -369,6 +372,7 @@ function receiveMsgs(p, msgs) {
       best.expiration = time + best.hops;
       if (_tracingMessage && _tracedMessage.msgid == best.msgid) _tracedMessage = best;
       console.log(p.i, "receiveMsgs: making new return message", m, best);
+      addToPath(best, p);
     }
     // tighten hops
     if (m.hops < best.hops && m.ack == best.ack) {
@@ -376,6 +380,7 @@ function receiveMsgs(p, msgs) {
     }
     if (p.cop[best.dest] && p.cop[best.dest].hops < best.hops) {
       best.hops = p.cop[best.dest].hops;
+      addToPath(best, p);
     }
     // save best
     p.bestMsgs[msgid] = best;
@@ -388,114 +393,6 @@ function receiveMsgs(p, msgs) {
     }
   }
 }
-    /*
-    if (!best) {
-      if (p.i != m.dest) {
-        console.log(p.i, "receiveMsgs: updating best ", m);
-        best = p.bestMsgs[msgid] = copyo2(m);
-      }
-      else if (m.ack) {
-        console.log("Round Trip", m);
-        best = p.bestMsgs[msgid] = copyo2(m);
-      }
-      else {
-        console.log(p.i, "receiveMsgs: One Way", m);
-        if (p.cop[m.src]) {
-          best = p.bestMsgs[msgid] =
-            copyo({dest: m.src, src: m.dest, ack: true, via: p.i, hops: p.cop[m.src].hops},
-                  copyo2(m));
-          best.expiration = time + best.hops;
-          if (_tracingMessage && _tracedMessage.msgid == best.msgid) _tracedMessage = best;
-          console.log(p.i, "receiveMsgs: making new return message", m, best);
-        }
-        else {
-          best = copyo2(m);
-          console.log(p.i, "receiveMsgs: Can't return because dest does not know the source.", m, best);
-        }
-      }
-    }
-    else if (m.ack && !best.ack // previous best was forwarding and now the message is returning.
-             || m.ack == best.ack // or same direction and new msg is better
-             && m.hops < best.hops) { // todo: change hops to a better measure that takes into consideration probabilities
-      if (p.i == m.dest) {
-        if (m.ack) {
-          console.log("Round trip", m);
-        }
-        else {
-          console.log("One Way", m);
-        }
-      }
-      console.log(p.i, "receiveMsgs: updating best from ", best);
-      best = p.bestMsgs[msgid] = copyo2(m);
-      console.log(p.i, "receiveMsgs: updated best ", best);
-    }
-    else {
-      console.log(p.i, "receiveMsgs: best for this message is unchanged", m, best);
-    }
-    if (p.i == best.dest
-        || p.i == best.src
-        || p.cop[best.dest]
-        && p.cop[best.dest].hops < m.hops) {
-      if (!best.paths[p.i]) best.paths[p.i] = {};
-      best.paths[p.i][m.via] = true;
-      best.via = p.i;
-      best.hops = p.i==best.dest? 0: Math.min(m.hops, p.cop[best.dest].hops);
-    }
-    best.correcting = undefined;
-
-
-
-    var m2; // temp variable
-
-    // Help if you can.
-    if (p.i == best.src) { // reached destination and turning around
-      console.log(p.i, "receiveMsgs: Turning around ", m, best);
-      p.msgsOut[m.msgid] = best;
-    }
-    else if (p.i == best.dest && (!p.msgsOut[msgid] || !p.msgsOut[msgid].correcting)) {
-      console.log(p.i, "receiveMsgs: Received a round-trip reply, so stop sending the msg", m, p.msgsOut[msgid]);
-      delete p.msgsOut[msgid];
-    }
-    else if (p.i != best.dest // if message has not reached it's destination
-             && (p.cop[best.dest] // and we're closer than the sender of the msg
-             && p.cop[best.dest].hops < m.hops
-             || p.i == best.src)) { // or we are the src
-      // note that we update our best
-      m2 = p.msgsOut[m.msgid] = best = p.bestMsgs[msgid] = copyo2(m);
-      m2.via = p.i;
-      m2.hops = p.cop[best.dest].hops;
-      if (!m2.paths[p.i]) m2.paths[p.i] = {};
-      m2.paths[p.i][m.via] = true;
-      console.log(p.i, "receiveMsgs: Helping with our best ", m, best);
-    }
-    // If you hear worse, send your best
-    else if (!p.msgsOut[msgid]
-             && (!m.ack && best.ack
-                 || m.hops > best.hops)) {
-      console.log(p.i, "receiveMsgs: heard worse, sending our best.", m, best);
-      var m2 = p.msgsOut[msgid] = copyo(best); // shallow copy is ok
-      m2.correcting = time+2;
-    }
-    // stop if you see better or if you were correcting
-    else if ((m2 = p.msgsOut[msgid]) &&
-             (!m2.correcting && best.via != p.i)) {
-      console.log(p.i, "receiveMsgs: removing from msgsOut because the we've seen better ", m2, best);
-      delete p.msgsOut[msgid];
-    }
-    else if ((m2 = p.msgsOut[msgid])
-             && m2.correcting && m2.correcting < time) {
-      console.log(p.i, "receiveMsgs: removing from msgsOut because the we were just correcting ", m2, best);
-      delete p.msgsOut[msgid];
-    }
-    else if (p.msgsOut[msgid]) {
-      console.log(p.i, "receiveMsgs: Already forwarding this message", m, best, p.msgsOut[msgid]);
-    }
-    else {
-      console.log(p.i, "receiveMsgs: Can't help, correct, or stop. Doing nothing ", m, best);
-    }
-  }
-}
-*/
 
 
 function getSnapshots(p) {
