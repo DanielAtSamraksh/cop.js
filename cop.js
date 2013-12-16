@@ -1577,10 +1577,13 @@ function addv(v1, v2) {
 }
 
 function stink() {
-    particles.forEach(function(p, i){
-	if (i==0) return;
-	p.stinky = Math.random() < stinky;
-    });
+  if (stinky >= particles.length) {
+    // stinky = particles.length - 2;
+    // throw "too many repulsive nodes";
+  }
+  for (var i = 0; i < stinky && i < particles.length; i++) {
+    particles[particles.length - 1 - i].stinky = true;
+  }
 }
 
 // function to handle integer form inputs.
@@ -1708,9 +1711,9 @@ function setup() {
   var el = document.getElementById("stinky");
   var v = parseInt(el.value);
   el.value = ""+v;
-  stinky = v/1000;
+  stinky = v;
   el.onchange = handleInt(function (n) {
-	  stinky = n/1000;
+	  stinky = n;
 	  updateForm();
 	  stink();
 	  return false;

@@ -27,22 +27,26 @@
           <label class="tab block" for="groundTab"> Ground </label>
           <div class="tab">
               <label>
-                  <input id="num" name="num" value="20" size="3" type="text">
+                  <input id="num" name="num" value="20" min="1" max="10000" step="1" type="number">
                   nodes
               </label>
 
-              <label title="Some nodes repel other nodes, creating holes in the field.">
-                  <input id="stinky" name="stinky" type="range" min="0" max="100" value="0">
+              <label class="hidden" title="Some nodes repel other nodes, creating holes in the field.">
+                  <input id="stinky" name="stinky" type="range" min="0" max="10000" value="0">
                   <output for="stinky" id="stinkyOut"></output> per thousand repellant nodes
+              </label>
+              <label title="Some nodes repel other nodes, creating holes in the field.">
+                  <input id="stinky" name="stinky" type="number" min="0" max="10000" step="1" value="0">
+                  <output for="stinky" id="stinkyOut"></output> repellant nodes
               </label>
 
               <label>
-                  <input id="avgNeighbors" name="avgNeighbors" size="3" type="text" value="7" >
+                  <input id="avgNeighbors" name="avgNeighbors" min="0" max="100" type="number" value="7" >
                   average number of neighbors
               </label>
 
               <label>
-                  <input id="maxSpeed" name="maxSpeed" size="3" type="text" value="1">
+                  <input id="maxSpeed" name="maxSpeed" min="0" max="100" type="number" value="1">
                   maximum speed (pixels per iteration)
               </label>
 
@@ -74,7 +78,7 @@
           <label class="tab block" for="copTab"> Cop Information </label>
           <div class="tab">
               <label>
-                  <input id="snapshots" name="snapshots" type="text" size="3" value="2000">
+                  <input id="snapshots" name="snapshots" type="number" min="0" value="2000">
                   link capacity: snapshots sendable per broadcast cycle
               </label>
 
@@ -129,7 +133,7 @@
               </label>
 
               <label title="test for senting snapshot = distance * random() * sensitivity < 1.">
-                  <input id="distanceSensitivity" name="distanceSensitivity" type="text" size="3" value="1">
+                  <input id="distanceSensitivity" name="distanceSensitivity" type="number" value="1">
                   distance sensitivity
               </label>
 
@@ -200,6 +204,7 @@
   window.onload = window.onresize = setup;
 </script>
 <style>
+    .hidden {display:none;}
     html, body { background: white; margin: 0; padding:0; }
     canvas { position: absolute; outline: 0px solid red; z-index: 0;}
     #canvas2 { z-index: 1; }
