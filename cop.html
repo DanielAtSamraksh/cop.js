@@ -195,8 +195,21 @@
               <output id="msgStatus"></output>
           </div>
       </div>
+      <div>
+          <input class="toggle tab" id="graphTab" name="tab" type="checkbox">
+          <label class="tab block" for="graphTab"> Graphs </label>
+          <div class="tab" id="graphs">
+
+          </div>
+      </div>
   </div>
 </form>
+<div class="graphs">
+    <div class="graph">
+                  <h1>Cop: Staleness v Distance</h1>
+                  <canvas id="cop_staleness_v_distance"></canvas>
+    </div>
+</div>
 <!-- <script src="http://d3js.org/d3.v3.min.js"></script>  -->
 <script src="d3.v3.min.js"></script>
 <script src="cop.js"></script>
@@ -206,7 +219,7 @@
 <style>
     .hidden {display:none;}
     html, body { background: white; margin: 0; padding:0; }
-    canvas { position: absolute; outline: 0px solid red; z-index: 0;}
+    #canvas2 { position: absolute; outline: 0px solid red; z-index: 0;}
     #canvas2 { z-index: 1; }
     form { display: block; position: absolute; z-index: 2; opacity: .9;}
     form:hover { background: white; }
@@ -233,6 +246,12 @@
     input.tab ~ label.tab { background: rgba(228,228,255,.2); border-top: 1px solid black; }
     input.tab:checked ~ label.tab {  }
     input.tab:checked ~ div.tab { display:block;  }
+
+    .graphs {position: absolute; z-index: 1; right: 0; }
+    .graph { float: right; z-index: 1; margin: 0 0 1em 1em; }
+    .graph h1 {font-size: .7em;}
+    .graph {outline: 1px solid gray; }
+    .graph canvas {outline: 1px solid gray; }
 </style>
 
 </body></html>

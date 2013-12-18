@@ -1422,38 +1422,41 @@ Particle.prototype.snapshot = function (i, ideal) {
     : {i:i, x:null, y:null, ts:null, hops:null};
 };
 
+Particle.prototype.receiveSnapshot = function(s) {
+  var p = this;
+  if (!p.cop[s.i] || p.cop[s.i].ts < s.ts) {
+    // not in cop table (we just throw away stale data, this is probably suboptimal)
+    if (!p.cop[s.i]
+        || p.cop[s.i].x != s.x
+        || p.cop[s.i].y != s.y) {
+      // console.log(p.i, "receiveSnapshots: updating cop", time);
+      lastUpdate = time;
+    }
+    cop_staleness_v_distance_update(p, s.i);
+    p.cop[s.i] = {
+      i:s.i, x:s.x, y:s.y, ts:s.ts,
+      seen:1, hops:s.hops+1, passed_over:0
+    };
+  }
+  else if (p.cop[s.i].ts > s.ts) { // stale, ignore, also suboptimal
+	  return;
+	}
+  else {
+    if (p.cop[s.i].hops > s.hops+1) {
+      // console.log("receiveSnapshots: updating cop", time);
+      lastUpdate = time;
+    }
+	  p.cop[s.i].seen += 1;
+	  p.cop[s.i].hops = Math.min(p.cop[s.i].hops, s.hops+1);
+	}
+};
+
 Particle.prototype.receiveSnapshots = function(snapshots) {
   var p = this;
   // if (p.i == 0)
   // console.log("receiveSnapshots", snapshots);
-  snapshots.forEach(
-    function(s){
-      if (!p.cop[s.i] || p.cop[s.i].ts < s.ts) {
-        // not in cop table (we just throw away stale data, this is probably suboptimal)
-        if (!p.cop[s.i]
-            || p.cop[s.i].x != s.x
-            || p.cop[s.i].y != s.y) {
-          // console.log(p.i, "receiveSnapshots: updating cop", time);
-          lastUpdate = time;
-        }
-		    p.cop[s.i] = {
-          i:s.i, x:s.x, y:s.y, ts:s.ts,
-          seen:1, hops:s.hops+1, passed_over:0
-        };
-      }
-      else if (p.cop[s.i].ts > s.ts) { // stale, ignore, also suboptimal
-	  	  return;
-	    }
-  	  else {
-        if (p.cop[s.i].hops > s.hops+1) {
-          // console.log("receiveSnapshots: updating cop", time);
-          lastUpdate = time;
-        }
-	  	  p.cop[s.i].seen += 1;
-		    p.cop[s.i].hops = Math.min(p.cop[s.i].hops, s.hops+1);
-	    }
-    });
-}
+  snapshots.forEach(function(s) {p.receiveSnapshot(s);});
+};
 
 // return the next time that it looks like it's safe the transmit.
 Particle.prototype.nextOpenTransmissionTime = function() {
@@ -1985,14 +1988,15 @@ function drawCircle(p1,r, style) {
    ctx.stroke();
   ctx.restore();
 }
-function drawFilledCircle(p1,r, style) {
-  ctx.save();
-  ctx.beginPath();
-   ctx.arc(p1.x, p1.y, r, 0, 2*Math.PI);
-   ctx.lineWidth = 1;
-   ctx.fillStyle = style || "#f09090";
-   ctx.fill();
-  ctx.restore();
+function drawFilledCircle(p1,r, style, c) {
+  if (!c) c = ctx;
+  c.save();
+  c.beginPath();
+  c.arc(p1.x, p1.y, r, 0, 2*Math.PI);
+  c.lineWidth = 1;
+  c.fillStyle = style || "#f09090";
+  c.fill();
+  c.restore();
 }
 function drawPieChart(p, r /*, style1, percentage1, style2, percentage2, ... */ ) {
   ctx.save();
@@ -2057,7 +2061,7 @@ Particle.prototype.draw = function () {
                 );
   }
 
-  if (p.messaging[4])      drawFilledCircle(p, 4, "rgba(255,0,0,.5)");   // round trip = red
+  if (0 && p.messaging[4])      drawFilledCircle(p, 4, "rgba(255,0,0,.5)");   // round trip = red
   else if (0 && p.messaging[3]) drawFilledCircle(p, 4, "rgba(128,0,0,.5)");  // returning = dark red
   else if (0 && p.messaging[2]) drawFilledCircle(p, 4, "rgba(255,255,0,.5)"); // destination = yellow
   else if (0 && p.messaging[1]) drawFilledCircle(p, 4, "rgba(0, 128,.5)"); // forwarding = darker green
@@ -2409,5 +2413,30 @@ function testheap() {
 }
 
 
+var canvas_cop_staleness_v_distance = document.getElementById("cop_staleness_v_distance");
+var ctx_cop_staleness_v_distance = canvas_cop_staleness_v_distance.getContext("2d");
+ctx_cop_staleness_v_distance.canvas.width = ctx_cop_staleness_v_distance.canvas.height = 100;
+var num_cop_staleness_v_distance = 1000;
+var arr_cop_staleness_v_distance = [];
+function drawGraphPointf(graph) {
+  var c = window["ctx_"+graph];
+  return function(x, y, erase) {
+    drawFilledCircle({x:x, y:100-y}, 1, erase? "while": "rgba(100,100,100,.1)", c);
+  }
+}
+function cop_staleness_v_distance_update (p, i) {
+  var coprow = p.cop[i];
+  if (!coprow) return;
+  var draw = drawGraphPointf("cop_staleness_v_distance");
+  var arr = arr_cop_staleness_v_distance;
+  if (arr.length == num_cop_staleness_v_distance) {
+    draw(arr[0].distance, arr[0].staleness, 1);
+    arr.shift();
+  }
+  var d = distance(p, coprow) / distance({x:0,y:0}, {x:width, y:height}) * 100;
+  var t = time - coprow.ts;
+  draw(d, t);
+  arr.push({distance:d, staleness:t});
+}
 
 
