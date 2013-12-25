@@ -27,7 +27,7 @@
           <label class="tab block" for="groundTab"> Ground </label>
           <div class="tab">
               <label>
-                  <input id="num" name="num" value="20" min="1" max="10000" step="1" type="number">
+                  <input id="num" name="num" value="200" min="1" max="10000" step="1" type="number">
                   nodes
               </label>
 
@@ -195,20 +195,13 @@
               <output id="msgStatus"></output>
           </div>
       </div>
-      <div>
-          <input class="toggle tab" id="graphTab" name="tab" type="checkbox">
-          <label class="tab block" for="graphTab"> Graphs </label>
-          <div class="tab" id="graphs">
-
-          </div>
-      </div>
   </div>
 </form>
-<div class="graphs">
-    <div class="graph">
+<div id="graphs">
+    <!--div class="graph">
                   <h1>Cop: Staleness v Distance</h1>
                   <canvas id="cop_staleness_v_distance"></canvas>
-    </div>
+    </div-->
 </div>
 <!-- <script src="http://d3js.org/d3.v3.min.js"></script>  -->
 <script src="d3.v3.min.js"></script>
@@ -247,7 +240,7 @@
     input.tab:checked ~ label.tab {  }
     input.tab:checked ~ div.tab { display:block;  }
 
-    .graphs {position: absolute; z-index: 1; right: 0; }
+    #graphs {position: absolute; z-index: 1; right: 0; }
     .graph { float: right; z-index: 1; margin: 0 0 1em 1em; }
     .graph h1 {font-size: .7em;}
     .graph {outline: 1px solid gray; }

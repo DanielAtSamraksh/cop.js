@@ -180,17 +180,6 @@ function moveParticles(){
   }
 }
 
-var _started = false;
-function warmStart() {
-  if (_started) return false;
-  if (startCopKnown && lastUpdate + 3 > time) {
-    // console.log("warmStart = true");
-    return true;
-  }
-  console.log("warmStart over: time now=", time, "last update=", lastUpdate);
-  _started = true;
-  return false;
-}
 
 function sendSnapshots(p) {
   return function () {
@@ -210,7 +199,7 @@ function sendSnapshots(p) {
                  action: sendSnapshots(p)});
 
     // maybe generate our own message
-    if (!warmStart() && !traceMessage() && topoSend > 0 && Math.random() < topoSend) {
+    if (!traceMessage() && topoSend > 0 && Math.random() < topoSend) {
       console.log(p.i, "sendSnapshot: generating a new message");
       var m = generateMessage(p);
       if (m) {
@@ -307,92 +296,6 @@ function addToPath(msg, p) {
   msg.via = p.i;
 }
 
-/*
-Maxims:
-1) Track the best.
-2) Help if you can.
-3) Stop when you hear better.
-4) Respond to worse with your best.
-
-Discussion:
-For each msgid a hears, the node tracks the "best" version.
-
-The best may be an externally-generated message, or an internally generated one.
-If it can help pass along the best version it will do so.
-
-"Stop when you hear better."
-
-As long as the best message is internally generated,
-the node will continue broadcasting it.
-
-When the best message is external, it will stop.
-
-This ensures that messages always make progress.
-
-"Respond to worse with your best."
-
-To avoid over-transmission, when a node hears a message that is not the best,
-it will broadcast it's best, in hope of correcting the ignorant.
-
-When the ignorant node hears the better message, it stop (applying maxim 1.)
-
-*/
-function receiveMsgs(p, msgs) {
-  // msgs = [{dest, src, hops, ts, msgid, via}]
-  // console.log("receiveMsgs for "+p.i);
-  for (var msgid in msgs) {
-    var m = msgs[msgid];
-    if (m.expiration < time) {
-      console.log(p.i, "receiveMsgs: Received expired msg.", m)
-      if (p.msgsOut[m.msgid] && p.msgsOut[m.msgid].expiration < time) {
-        delete p.msgsOut[m.msgid];
-        console.log(p.i, "receiveMsgs: Remove expired msg.", m)
-      }
-      continue;
-    }
-
-    // Track the best that we've seen: did the best change?
-    var best = p.bestMsgs[msgid];
-    // if 1st time or 1st reply
-    if (!best || !best.ack && m.ack) {
-      best = copyo2(m);
-      addToPath(best, p);
-      if (m.dest == p.i && m.ack) {
-        console.log(p.i, "receiveMsgs: ROUND TRIP", best);
-        best.hops = 0;
-      }
-    }
-    // one way
-    if (p.i == best.dest && !best.ack) {
-      console.log(p.i, time, "receiveMsgs: ONE WAY", m);
-      best.dest = m.src;
-      best.src = m.dest;
-      best.ack = true;
-      best.hops = p.cop[best.dest] && p.cop[best.dest].hops || 0;
-      best.expiration = time + best.hops;
-      if (_tracingMessage && _tracedMessage.msgid == best.msgid) _tracedMessage = best;
-      console.log(p.i, "receiveMsgs: making new return message", m, best);
-      addToPath(best, p);
-    }
-    // tighten hops
-    if (m.hops < best.hops && m.ack == best.ack) {
-      best.hops = m.hops;
-    }
-    if (p.cop[best.dest] && p.cop[best.dest].hops < best.hops) {
-      best.hops = p.cop[best.dest].hops;
-      addToPath(best, p);
-    }
-    // save best
-    p.bestMsgs[msgid] = best;
-    // help if possible
-    if (m.ack != best.ack || m.hops > best.hops) {
-      p.msgsOut[m.msgid] = best;
-    }
-    else {
-      delete p.msgsOut[msgid];
-    }
-  }
-}
 
 
 function getSnapshots(p) {
@@ -405,9 +308,9 @@ function getSnapshots(p) {
   for (var i in p.cop) {
   	copTableSize++;
     c = p.cop[i];
-    if (c.seen < 3 &&
-        (distance(c, p) * Math.random() / p.radioDistance * distanceSensitivity < 1
-         || (randomCutoff && c.passed_over >= p.radioDistance * distanceSensitivity))) {
+    if (c.seen < 3
+        && (distance(c, p) * Math.random() / p.radioDistance * distanceSensitivity < 1
+            || (randomCutoff && c.passed_over >= p.radioDistance * distanceSensitivity))) {
 	    snapshots.push(p.snapshot(i));
       c.passed_over = 0;
   	}
@@ -473,7 +376,7 @@ function getMsgs(p) {
   return p.msgsOut;
 }
 
-function generateMessage(p) {
+function generateMessage(p, dest) {
   if (particles[0].cop[p.i]) console.log("generateMessage");
   // create a unique message
   // if (!p.cop[0]) return 0; // don't send to unknown dest
@@ -483,7 +386,7 @@ function generateMessage(p) {
   msgid = Math.random();
   // } while ( msgid in messages.src);
   var msg = {
-    msgid: msgid, src: p.i, via: p.i, dest: 0, ts: time,
+    msgid: msgid, src: p.i, via: p.i, dest: dest || 0, ts: time,
     paths: {}, // paths normally contain sets,
     // eg paths[dest][src] = 1 for each link in the path.
     hops: p.cop[0]? p.cop[0].hops + surplusHops: 0,
@@ -675,7 +578,6 @@ function traceMessage(start) {
   if (start !== undefined && !start) {
     _tracingMessage = false;
   }
-  if (warmStart()) return false;
   return _tracingMessage;
 }
 
@@ -862,7 +764,7 @@ function ptIsNaN(p){
 var maxSpeed;
 var motionModels = { // moves particle according to various motion models
   randomVelocity: function(p){ // pick a destination and velocity and go
-    if (warmStart() || maxSpeed <= 0) return;
+    if (maxSpeed <= 0) return;
     if (ptIsNaN(p.dest) || isNaN(p.speed) || distance(p, p.dest) < p.speed ) {
       randomPt(p.dest);
       p.speed = random() * maxSpeed;
@@ -872,13 +774,13 @@ var motionModels = { // moves particle according to various motion models
     checkBounds(p);
   },
   randomWalk: function(p){
-    if (warmStart() || maxSpeed <= 0) return;
+    if (maxSpeed <= 0) return;
     p.move(randomVelocity());
     motionModels.repel(p);
     checkBounds(p);
   },
   mostlyStraight: function(p){
-    if (warmStart() || maxSpeed <= 0) return;
+    if (maxSpeed <= 0) return;
     if (ptIsNaN(p.dest) || p.distance(p.dest) < radioDistance) {
       p.dest = getNewDest(p);
     }
@@ -897,7 +799,7 @@ var motionModels = { // moves particle according to various motion models
     checkBounds(p);
   },
   flock: function(p){
-    if (warmStart() || maxSpeed <= 0) return;
+    if (maxSpeed <= 0) return;
     var p_original = { x: p.x, y: p.y };
     // choose a new destination if needed
     if (isNaN(p.x) ) p.x = random() * width;
@@ -954,7 +856,7 @@ var motionModels = { // moves particle according to various motion models
     }
   },
   follow: function(p) {
-    if (warmStart() || maxSpeed <= 0) return;
+    if (maxSpeed <= 0) return;
     var p_original = { x: p.x, y: p.y };
     // choose a new destination if needed
     if (ptIsNaN(p) ) p.x = random() * width, p.y = random() * height;
@@ -992,7 +894,7 @@ var motionModels = { // moves particle according to various motion models
     }
   },
   flockSimple: function(p) {
-    if (warmStart() || maxSpeed <= 0) return;
+    if (maxSpeed <= 0) return;
     var p_original = { x: p.x, y: p.y };
     // choose a new destination if needed
     if (ptIsNaN(p) ) p.x = random() * width, p.y = random() * height;
@@ -1017,7 +919,7 @@ var motionModels = { // moves particle according to various motion models
     }
   },
   repel: function(p) {
-    if (warmStart() || maxSpeed <= 0) return;
+    if (maxSpeed <= 0) return;
     else {
       var ns = p.getNeighbors();
 	    for (var i in ns) {
@@ -1217,6 +1119,7 @@ function Particle(i) {
   this.neighborhoodts = -1;
   this.neighborhood = null;
   this.setNeighborhood();
+  this.lastUpdate = -1;
   this.capacity = new Capacity(10);
   eventQ.push({time: time + .5 + random(), name: "sendSnapshots", action: sendSnapshots(this)});
   // console.log("creating particle "+i);
@@ -1329,6 +1232,42 @@ Particle.prototype.setNeighborhood = function () {
   // console.log(p.i, time, "setNeighborhood: neighborhood", p.neighborhood, p.neighborhoodts);
 };
 
+Particle.prototype.copWarmup = function(i){
+  var p = this;
+  if (i === undefined) i = p.i;
+  function newNeighbor(n) {return n.cop[i] === undefined;}
+  var snapshot = p.snapshot(i);
+  console.log(p.i, "warming up for", i);
+  p.getNeighbors().forEach(function(n){
+    if (newNeighbor(n)) {
+      n.receiveSnapshot(snapshot);
+      console.log(n.i, "warmup: neighbor receives snapshot", i, n);
+      eventQ.push({time:time, name: "warmup"+i, action: function(){n.copWarmup(i);}});
+    }
+  });
+  return;
+
+  var nodes = [p];
+
+  eventQ.push({time: 2, name: "moveParticles", action: moveParticles() });
+
+  while (nodes.length > 0) {
+    p = nodes.shift();
+    console.log(p.i, "warming up for", i);
+    var snapshot = p.snapshot(i);
+    p.getNeighbors().forEach(function(n){
+      if (newNeighbor(n)) {
+        n.receiveSnapshot(snapshot);
+        console.log(n.i, "neighbor receives snapshot", i, n);
+        nodes.push(n);
+      }
+      // else {
+      //   console.log(n.i, "neighbor already has a cop entry", i, n);
+      // }
+    });
+  }
+};
+
 Particle.prototype.move = function(v) {
   var p = this;
   if (v) p.v = {x:v.x, y:v.y};
@@ -1398,7 +1337,7 @@ Particle.prototype.emptyPacketQ = function (){
     }
     for (var dummy in (m.msgs || {})) {
       // console.log(p.i, "at time", time, "emptyPacketQ: receiving msg");
-      receiveMsgs(p, m.msgs);
+      p.receiveMsgs(m.msgs);
       break;
     }
   }
@@ -1412,6 +1351,7 @@ Particle.prototype.updateOwnCop = function () {
 
 Particle.prototype.snapshot = function (i, ideal) {
   var p = this;
+  if (i === undefined) i = p.i;
   if (ideal) {
     pi = particles[i];
     return {i:i, x:pi.x, y:pi.y, ts:time, hops:distance(p, pi)/radioDistance};
@@ -1422,16 +1362,13 @@ Particle.prototype.snapshot = function (i, ideal) {
     : {i:i, x:null, y:null, ts:null, hops:null};
 };
 
+var warmupUpdates = 0;
+
 Particle.prototype.receiveSnapshot = function(s) {
   var p = this;
   if (!p.cop[s.i] || p.cop[s.i].ts < s.ts) {
     // not in cop table (we just throw away stale data, this is probably suboptimal)
-    if (!p.cop[s.i]
-        || p.cop[s.i].x != s.x
-        || p.cop[s.i].y != s.y) {
-      // console.log(p.i, "receiveSnapshots: updating cop", time);
-      lastUpdate = time;
-    }
+
     cop_staleness_v_distance_update(p, s.i);
     p.cop[s.i] = {
       i:s.i, x:s.x, y:s.y, ts:s.ts,
@@ -1442,10 +1379,6 @@ Particle.prototype.receiveSnapshot = function(s) {
 	  return;
 	}
   else {
-    if (p.cop[s.i].hops > s.hops+1) {
-      // console.log("receiveSnapshots: updating cop", time);
-      lastUpdate = time;
-    }
 	  p.cop[s.i].seen += 1;
 	  p.cop[s.i].hops = Math.min(p.cop[s.i].hops, s.hops+1);
 	}
@@ -1491,7 +1424,7 @@ Particle.prototype.broadcast = function (pkt) {
   var p = this;
   var nextTime = p.nextOpenTransmissionTime();
   if (nextTime > time) {
-    console.log(p.i, "broadcast at time ", time, "is not possible. Must wait until time", nextTime);
+    // console.log(p.i, "broadcast at time ", time, "is not possible. Must wait until time", nextTime);
     return nextTime;
   }
   p.getNeighbors().concat([p]).forEach(function(n){
@@ -1501,7 +1434,7 @@ Particle.prototype.broadcast = function (pkt) {
       throw "path too long";
     }
     for (var dummy in pkt.msgs) {
-      console.log(p.i, "broadcasting messages ", keys(pkt.msgs), " to ", n.i);
+      // console.log(p.i, "broadcasting messages ", keys(pkt.msgs), " to ", n.i);
       break;
     }
     n.packets.push(pkt);
@@ -1538,14 +1471,103 @@ Particle.prototype.sendMessages = function() {
   }
 };
 
+/*
+Maxims:
+1) Track the best.
+2) Help if you can.
+3) Stop when you hear better.
+4) Respond to worse with your best.
+
+Discussion:
+For each msgid a hears, the node tracks the "best" version.
+
+The best may be an externally-generated message, or an internally generated one.
+If it can help pass along the best version it will do so.
+
+"Stop when you hear better."
+
+As long as the best message is internally generated,
+the node will continue broadcasting it.
+
+When the best message is external, it will stop.
+
+This ensures that messages always make progress.
+
+"Respond to worse with your best."
+
+To avoid over-transmission, when a node hears a message that is not the best,
+it will broadcast it's best, in hope of correcting the ignorant.
+
+When the ignorant node hears the better message, it stop (applying maxim 1.)
+
+*/
+Particle.prototype.receiveMsgs = function (msgs) {
+  var p = this;
+  // msgs = [{dest, src, hops, ts, msgid, via}]
+  // console.log("receiveMsgs for "+p.i);
+  for (var msgid in msgs) { p.receiveMsg(msgs[msgid]); }
+};
+
+Particle.prototype.receiveMsg = function(m) {
+  var p = this;
+    if (m.expiration < time) {
+      console.log(p.i, "receiveMsgs: Received expired msg.", m)
+      if (p.msgsOut[m.msgid] && p.msgsOut[m.msgid].expiration < time) {
+        delete p.msgsOut[m.msgid];
+        console.log(p.i, "receiveMsgs: Remove expired msg.", m)
+      }
+      return;
+    }
+
+    // Track the best that we've seen: did the best change?
+    var best = p.bestMsgs[m.msgid];
+    // if 1st time or 1st reply
+    if (!best || !best.ack && m.ack) {
+      best = copyo2(m);
+      addToPath(best, p);
+      if (m.dest == p.i && m.ack) {
+        console.log(p.i, "receiveMsgs: ROUND TRIP", best);
+        best.hops = 0;
+      }
+    }
+    // one way
+    if (p.i == best.dest && !best.ack) {
+      console.log(p.i, time, "receiveMsgs: ONE WAY", m);
+      best.dest = m.src;
+      best.src = m.dest;
+      best.ack = true;
+      best.hops = p.cop[best.dest] && p.cop[best.dest].hops || 0;
+      best.expiration = time + best.hops;
+      if (_tracingMessage && _tracedMessage.msgid == best.msgid) _tracedMessage = best;
+      console.log(p.i, "receiveMsgs: making new return message", m, best);
+      addToPath(best, p);
+    }
+    // tighten hops
+    if (m.hops < best.hops && m.ack == best.ack) {
+      best.hops = m.hops;
+    }
+    if (p.cop[best.dest] && p.cop[best.dest].hops < best.hops) {
+      best.hops = p.cop[best.dest].hops;
+      addToPath(best, p);
+    }
+    // save best
+    p.bestMsgs[m.msgid] = best;
+    // help if possible
+    if (m.ack != best.ack || m.hops > best.hops) {
+      p.msgsOut[m.msgid] = best;
+    }
+    else {
+      delete p.msgsOut[m.msgid];
+    }
+}
 
 function copWarmup() {
   console.log("warming up Cop");
   particles.forEach(function (p) {
-    var snapshots = particles.map(function(p2){return p.snapshot(p2.i, true);});
-    p.receiveSnapshots(snapshots);
+    eventQ.push({time:time, name: "warmup"+p.i, action: function(){p.copWarmup(p.i);}});
   });
 }
+
 
 function makeParticles () {
   // console.log("makeParticles");
@@ -1945,8 +1967,7 @@ function setup() {
   setNeighborhoodParameters();
   particles = makeParticles();
   setNeighborhoods();
-  // if (startCopKnown) {    copWarmup();  }
-
+  if (startCopKnown) {    copWarmup();  }
   stink();
 
   start();
@@ -1954,8 +1975,10 @@ function setup() {
 
 //window.setTimeout(step, 1);
 
-function start() { d3.timer(runEventQ); }
-function isStopped() { return document.getElementById("stop").checked && !warmStart(); }
+function start() {
+  d3.timer(runEventQ);
+}
+function isStopped() { return document.getElementById("stop").checked; }
 function fillBlack() { ctx.fillStyle = "rgba(0,0,0,0.5)"; }
 function fillWhite() { ctx.fillStyle = "rgba(255,255,255,0.3)"; }
 function fillGreen() { ctx.fillStyle = "rgba(0,255,0,1)"; }
@@ -2066,6 +2089,7 @@ Particle.prototype.draw = function () {
   else if (0 && p.messaging[2]) drawFilledCircle(p, 4, "rgba(255,255,0,.5)"); // destination = yellow
   else if (0 && p.messaging[1]) drawFilledCircle(p, 4, "rgba(0, 128,.5)"); // forwarding = darker green
   else if (0 && p.messaging[0]) drawFilledCircle(p, 4, "rgba(0,255,0,.5)");   // sending = green
+  else if (Math.round(p.lastUpdate) == Math.round(time)) drawFilledCircle(p, 4, "rgba(255,0,0,.5)");
   else if (p.i == 0)       drawFilledCircle(p, 4, "rgba(255,150,0,.5)"); // special node = orange
   else if (p.i in particles[0].cop) drawFilledCircle(p, 3, "rgba(0,0,255,.5)"); // in cop table = blue
   else                     drawFilledCircle(p, 2, "rgba(100,100,100,.5)");     // not in cop table = gray
@@ -2413,30 +2437,210 @@ function testheap() {
 }
 
 
-var canvas_cop_staleness_v_distance = document.getElementById("cop_staleness_v_distance");
-var ctx_cop_staleness_v_distance = canvas_cop_staleness_v_distance.getContext("2d");
-ctx_cop_staleness_v_distance.canvas.width = ctx_cop_staleness_v_distance.canvas.height = 100;
-var num_cop_staleness_v_distance = 1000;
-var arr_cop_staleness_v_distance = [];
-function drawGraphPointf(graph) {
-  var c = window["ctx_"+graph];
+function drawGraphPointf(c) {
   return function(x, y, erase) {
-    drawFilledCircle({x:x, y:100-y}, 1, erase? "while": "rgba(100,100,100,.1)", c);
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    drawFilledCircle({x:x, y:c.canvas.height-y}, 1, erase? "white": "rgba(8,4,1,.5)", c);
+    c.restore();
   }
 }
+
+
+function Scatter(options) {
+  var defaultOptions = {
+    maxPoints: 100000,
+    name: "graph",
+    width: 100,
+    height: 100,
+    minX: NaN,
+    minY: NaN,
+    maxX: NaN,
+    maxY: NaN
+  };
+  var g = this;
+  copyo(defaultOptions, g);
+  copyo(options, g);
+  g.xs = []; g.ys = [];
+  if (document.getElementById(g.name)) throw "duplicate name";
+  var graphs = document.getElementById("graphs");
+  if (!graphs) throw "Can't find graphs";
+  // console.log("Scatter:", graphs.innerHTML);
+  graphs.innerHTML += '<div class="graph"><h1>'+g.name.replace(/_/g, ' ')+'"</h1><canvas id="'+g.name+'"></canvas></div>'
+                     +'<div class="graph"><h1>'+g.name.replace(/_/g, ' ')+'"2</h1><canvas id="'+g.name+'2"></canvas></div>';
+  g.canvas2 = document.getElementById(g.name+'2');
+  g.ctx2 = g.canvas2.getContext("2d");
+  g.ctx2.canvas.width = g.width;
+  g.ctx2.canvas.height = g.height;
+  g.canvas = document.getElementById(g.name);
+  g.ctx = g.canvas.getContext("2d");
+  g.ctx.canvas.width = g.width;
+  g.ctx.canvas.height = g.height;
+  g.drawGraphPoint = drawGraphPointf(g.ctx);
+}
+
+Scatter.prototype = {};
+
+Scatter.prototype.setLimits = function(x, y) {
+  var g = this;
+  if (g.maxPoints < g.xs.length
+      || isNaN(g.minX) || !isNaN(x) && g.minX > x
+      || isNaN(g.minY) || !isNaN(x) && g.minY > y
+      || isNaN(g.maxX) || !isNaN(y) && g.maxX < x
+      || isNaN(g.maxY) || !isNaN(y) && g.maxY < y) {
+    if (g.maxPoints < g.xs.length) {
+      g.xs = g.xs.slice(-1 * Math.round(g.maxPoints/2));
+      g.ys = g.ys.slice(-1 * Math.round(g.maxPoints/2));
+    }
+    g.minX = Math.min.apply(null, g.xs);
+    g.maxX = Math.max.apply(null, g.xs);
+    g.minY = Math.min.apply(null, g.ys);
+    g.maxY = Math.max.apply(null, g.ys);
+    g.toObject();
+    // console.log(g.name, "Scatter.setLimits", x, y, g.minX, g.maxX, g.minY, g.maxY);
+    return true;
+  }
+  return false;
+};
+
+Scatter.prototype.add = function(x,y){
+  var g = this;
+  // console.log(g.name, "Scatter.add", x, y);
+  g.xs.push(x); g.ys.push(y);
+  if (g.setLimits(x, y)) {
+    // if (isNaN(g.minX) || isNaN(g.maxX) || isNaN(g.minY) || isNaN(g.maxY)) throw "bad limits";
+    g.draw();
+  }
+  else {
+    g.iToObject();
+    g.drawi();
+    g.drawUnscaledPoint(x, y);
+  }
+};
+
+Scatter.prototype.drawUnscaledPoint = function(x, y) {
+  var g = this;
+  return g.drawGraphPoint.apply(g, g.xyToScaled(x,y));
+
+  // if (isNaN(g.minX) || isNaN(g.maxX) || ixsNaN(g.minY) || isNaN(g.maxY)) throw "bad limits";
+  var sx = g.minX == g.maxX? g.width/2: g.width * (x - g.minX) / (g.maxX - g.minX);
+  var sy = g.minY == g.maxY? g.height/2: g.height * (y - g.minY) / (g.maxY - g.minY);
+  // console.log(g.name, "Scatter.drawUnscaledPoint", x, y, sx, sy);
+  g.drawGraphPoint(Math.floor(sx), Math.floor(sy));
+  // g.drawGraphPoint(sx, sy);
+};
+
+// convert the ith point to an index into the object holding the pixel value
+Scatter.prototype.iToScaledJ = function (i) {
+  var g = this;
+  if (isNaN(i)) i = g.xs.length - 1;
+  // if (isNaN(g.minX) || isNaN(g.maxX) || isNaN(g.minY) || isNaN(g.maxY)) throw "bad limits";
+  var sx = g.minX == g.maxX? g.width/2: g.width * (g.xs[i] - g.minX) / (g.maxX - g.minX);
+  var sy = g.minY == g.maxY? g.height/2: g.height * (g.ys[i] - g.minY) / (g.maxY - g.minY);
+  return Math.floor(sx) + Math.floor(sy)*g.width;
+};
+
+Scatter.prototype.xyToScaled = function(x,y){
+  var g = this;
+  // if (isNaN(g.minX) || isNaN(g.maxX) || isNaN(g.minY) || isNaN(g.maxY)) throw "bad limits";
+  var sx = g.minX == g.maxX? g.width/2: g.width * (x - g.minX) / (g.maxX - g.minX);
+  var sy = g.minY == g.maxY? g.height/2: g.height * (y - g.minY) / (g.maxY - g.minY);
+  return [sx, sy];
+};
+
+Scatter.prototype.iToScaled = function(i){
+  var g = this;
+  if (isNaN(i)) i = g.xs.length - 1;
+  return g.toScaled(g.xs[i], g.ys[i]);
+};
+
+Scatter.prototype.toObject = function() {
+  var g = this;
+  var obj = {};
+  d3.range(g.xs.length).forEach(function(i){
+    var j = g.iToScaledJ(i);
+    var v = (obj[j] || 0) + 1;
+    obj[j] = v;
+  });
+  g.obj = obj;
+  return obj;
+};
+
+Scatter.prototype.iToObject = function(i) {
+  var g = this;
+  if (isNaN(i)) i = g.xs.length - 1;
+  var j = g.iToScaledJ(i);
+  var v = (g.obj[j] || 0) + 1;
+  g.obj[j] = v;
+  if (isNaN(g.maxScaledY) || v > g.maxScaledY) g.maxScaledY = v;
+  return g.obj;
+};
+
+Scatter.prototype.draw = function() {
+  var g = this;
+  g.setLimits();
+  g.ctx.save();
+  g.ctx.globalCompositeOperation = "source-over";
+  g.ctx.clearRect(0,0, g.width, g.height);
+  g.ctx.restore();
+  // console.log(g.name, "draw");
+  d3.range(g.xs.length).forEach(function(i){ g.drawUnscaledPoint(g.xs[i], g.ys[i]); });
+
+  // draw next
+  g.ctx2.clearRect(0,0,g.ctx2.canvas.width,g.ctx2.canvas.height);
+  g.ctx2.save();
+  for(var j in g.obj) {
+    var v = g.obj[j];
+    j = parseInt(j);
+    g.ctx2.fillStyle = g.color(v);
+    var sx = j % g.width;
+    var sy = g.height - Math.floor(j / g.width);
+    g.ctx2.fillRect(sx, sy, 1, 1);
+  }
+  g.ctx2.restore();
+};
+
+Scatter.prototype.drawi = function(i) {
+  var g = this;
+  g.ctx2.save();
+  var j = g.iToScaledJ(i);
+  g.ctx2.fillStyle = g.color(g.obj[j]);
+  var sx = j % g.width;
+  var sy = g.height - Math.floor(j / g.width);
+  g.ctx2.fillRect(sx, sy, 1, 1);
+  g.ctx2.restore();
+};
+
+Scatter.prototype.reset = function() {
+  var g = this;
+  g.xs = [];
+  g.ys = [];
+  g.obj = [];
+};
+
+var cop_staleness_v_distance_graph = new Scatter({
+  name: "cop_staleness_v_distance"
+});
+
+Scatter.prototype.color = function(v) {
+  var r =  Math.min(255, v*8);
+  var g =  Math.min(255, v*4);
+  var b =  Math.min(255, v*1);
+  return "rgba("+r+","+g+","+b+",.5)";
+};
+
+
+// var canvas_cop_staleness_v_distance = document.getElementById("cop_staleness_v_distance");
+
+// var ctx_cop_staleness_v_distance = canvas_cop_staleness_v_distance.getContext("2d");
+// ctx_cop_staleness_v_distance.canvas.width = ctx_cop_staleness_v_distance.canvas.height = 100;
+// var num_cop_staleness_v_distance = 1000;
+// var arr_cop_staleness_v_distance = [];
 function cop_staleness_v_distance_update (p, i) {
   var coprow = p.cop[i];
   if (!coprow) return;
-  var draw = drawGraphPointf("cop_staleness_v_distance");
-  var arr = arr_cop_staleness_v_distance;
-  if (arr.length == num_cop_staleness_v_distance) {
-    draw(arr[0].distance, arr[0].staleness, 1);
-    arr.shift();
-  }
-  var d = distance(p, coprow) / distance({x:0,y:0}, {x:width, y:height}) * 100;
+  var d = distance(p, coprow);
   var t = time - coprow.ts;
-  draw(d, t);
-  arr.push({distance:d, staleness:t});
+  cop_staleness_v_distance_graph.add(d, t);
 }
-
 
