@@ -1245,27 +1245,6 @@ Particle.prototype.copWarmup = function(i){
       eventQ.push({time:time, name: "warmup"+i, action: function(){n.copWarmup(i);}});
     }
   });
-  return;
-
-  var nodes = [p];
-
-  eventQ.push({time: 2, name: "moveParticles", action: moveParticles() });
-
-  while (nodes.length > 0) {
-    p = nodes.shift();
-    console.log(p.i, "warming up for", i);
-    var snapshot = p.snapshot(i);
-    p.getNeighbors().forEach(function(n){
-      if (newNeighbor(n)) {
-        n.receiveSnapshot(snapshot);
-        console.log(n.i, "neighbor receives snapshot", i, n);
-        nodes.push(n);
-      }
-      // else {
-      //   console.log(n.i, "neighbor already has a cop entry", i, n);
-      // }
-    });
-  }
 };
 
 Particle.prototype.move = function(v) {
